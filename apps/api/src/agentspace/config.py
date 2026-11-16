@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     default_model: str = "anthropic/claude-sonnet-5.5"
     default_system_prompt: str = (
         "You are a helpful assistant working in a workspace folder. "
-        "Use the read and write tools to inspect and change files in it. "
+        "Use your tools to read, write and edit files and to run shell commands in it. "
         "Paths are relative to the workspace."
     )
     max_turns: int = 50

@@ -38,11 +38,21 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
    Not built yet: pi's fuzzy match fallback (smart quotes, trailing spaces), and
    writing back a file with mixed line endings exactly as it was (a file with any
    CRLF is written back all-CRLF). *pi:* `tools/edit.ts`, `edit-diff.ts`.
-3. [ ] **`bash` tool.** `command` + `timeout?`, with `cwd` set to the workspace.
+3. [x] **`bash` tool.** `command` + `timeout?`, with `cwd` set to the workspace.
    Keep the tail of the output (2000 lines / 50 KB) and save the full output to a
    file when it is cut. Kill the process tree on timeout or cancel. Commands run
    on the host with the API's permissions, so this needs step 7 (permissions) or
    a sandbox before anyone else can reach the app.
+   Built as follows:
+   - The command's stdout/stderr goes straight to a temp file, not a pipe. With a
+     pipe, asyncio's `proc.wait()` waits for every holder of the pipe, so one
+     background child would hang the call.
+   - The command runs in its own process group. That group is killed when the
+     shell exits (ending background children), on timeout, and on cancel.
+   - The command gets an allowlisted environment (PATH, HOME, LANG, …), so the
+     server's API keys never reach it. pi does not do this.
+   - No default timeout, as in pi. A hung command runs until the run is cancelled.
+   - Unix only.
    *pi:* `tools/bash.ts`, `core/bash-executor.ts`, `tools/truncate.ts`.
 4. [ ] **`grep`, `find`, `ls` tools.** Read-only, respect `.gitignore`, and have
    result limits. *pi:* `tools/grep.ts`, `find.ts`, `ls.ts`.
