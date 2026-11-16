@@ -1,10 +1,11 @@
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from agentspace.agent.events import AgentEndEvent, AgentEvent, MessageEndEvent
 from agentspace.agent.loop import run_agent
-from agentspace.agent.tool import ToolContext
+from agentspace.agent.tool import Tool, ToolContext, ToolResult
 from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
 from agentspace.ai.providers.fake import FakeProvider, Reply, text_reply, tool_reply
 from agentspace.tools import default_tools
@@ -12,14 +13,16 @@ from agentspace.tools import default_tools
 pytestmark = pytest.mark.anyio
 
 
-async def run(provider: FakeProvider, workspace: Path, prompt: str = "go", max_turns: int = 10) -> list[AgentEvent]:
+async def run(
+    provider: FakeProvider, workspace: Path, prompt: str = "go", max_turns: int = 10, tools: list[Tool] | None = None
+) -> list[AgentEvent]:
     return [
         event
         async for event in run_agent(
             provider=provider,
             model="m",
             system_prompt="sys",
-            tools=default_tools(),
+            tools=default_tools() if tools is None else tools,
             history=[],
             prompt=UserMessage(content=prompt),
             ctx=ToolContext(workspace=workspace),
@@ -50,6 +53,7 @@ async def test_write_then_read_then_answer(tmp_path: Path) -> None:
     assert [m.role for m in messages] == ["user", "assistant", "tool_result", "assistant", "tool_result", "assistant"]
     read_result = messages[4]
     assert isinstance(read_result, ToolResultMessage) and read_result.content[0].text == "hi there"
+    assert read_result.details is not None and read_result.details["path"] == "hello.txt"
     assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"
     assert events[-1].new_messages == messages
     # Every request carries the system prompt, both tools and the transcript so far.
@@ -114,3 +118,26 @@ async def test_streamed_text_is_reported_as_message_updates(tmp_path: Path) -> N
     events = await run(FakeProvider([reply]), tmp_path)
     deltas = [e.event.delta for e in events if e.type == "message_update"]
     assert deltas == ["a", "b"]
+
+
+class NoParams(BaseModel):
+    pass
+
+
+class SoftFailTool(Tool[NoParams]):
+    """Fails by returning `is_error=True` instead of raising, keeping its details."""
+
+    name = "soft_fail"
+    description = "Always fails."
+    params = NoParams
+
+    async def execute(self, args: NoParams, ctx: ToolContext) -> ToolResult:
+        return ToolResult(content=[TextContent(text="nope")], details={"code": 7}, is_error=True)
+
+
+async def test_returned_error_results_keep_their_details(tmp_path: Path) -> None:
+    replies: list[Reply] = [tool_reply(call("soft_fail")), text_reply("ok")]
+    events = await run(FakeProvider(replies), tmp_path, tools=[SoftFailTool()])
+
+    result = next(m for m in ended(events) if isinstance(m, ToolResultMessage))
+    assert result.is_error and result.content[0].text == "nope" and result.details == {"code": 7}

@@ -368,6 +368,10 @@ export interface components {
             tool_name: string;
             /** Content */
             content: components["schemas"]["TextContent"][];
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Is Error
              * @default false

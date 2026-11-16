@@ -131,12 +131,18 @@ async def execute_tool_call(call: ToolCall, tools: Sequence[Tool], ctx: ToolCont
     except ValidationError as exc:
         return error_result(call, f"Invalid arguments for {call.name}:\n{exc}")
     try:
-        text = await tool.execute(args, ctx)
+        result = await tool.execute(args, ctx)
     except ToolError as exc:
         return error_result(call, str(exc))
     except Exception as exc:  # A tool bug must not end the run; the model sees it and can adapt.
         return error_result(call, f"{type(exc).__name__}: {exc}")
-    return ToolResultMessage(tool_call_id=call.id, tool_name=call.name, content=[TextContent(text=text)])
+    return ToolResultMessage(
+        tool_call_id=call.id,
+        tool_name=call.name,
+        content=result.content,
+        details=result.details,
+        is_error=result.is_error,
+    )
 
 
 def error_result(call: ToolCall, text: str) -> ToolResultMessage:

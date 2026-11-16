@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from agentspace.agent.tool import ToolContext, ToolError
+from agentspace.agent.tool import ToolContext, ToolError, ToolResult
 from agentspace.tools.read import MAX_BYTES, MAX_LINES, ReadParams, ReadTool
 from agentspace.tools.write import WriteParams, WriteTool
 
@@ -16,13 +16,18 @@ def ctx(tmp_path: Path) -> ToolContext:
     return ToolContext(workspace=workspace)
 
 
-async def read(ctx: ToolContext, path: str, offset: int | None = None, limit: int | None = None) -> str:
+async def read_result(ctx: ToolContext, path: str, offset: int | None = None, limit: int | None = None) -> ToolResult:
     return await ReadTool().execute(ReadParams(path=path, offset=offset, limit=limit), ctx)
+
+
+async def read(ctx: ToolContext, path: str, offset: int | None = None, limit: int | None = None) -> str:
+    return (await read_result(ctx, path, offset, limit)).content[0].text
 
 
 async def test_write_creates_parent_dirs_and_read_returns_content(ctx: ToolContext) -> None:
     out = await WriteTool().execute(WriteParams(path="a/b/notes.txt", content="one\ntwo\n"), ctx)
-    assert out == "Wrote 8 bytes to a/b/notes.txt"
+    assert out.content[0].text == "Wrote 8 bytes to a/b/notes.txt"
+    assert out.details == {"path": "a/b/notes.txt", "bytes": 8}
     assert (ctx.workspace / "a/b/notes.txt").read_text() == "one\ntwo\n"
     assert await read(ctx, "a/b/notes.txt") == "one\ntwo"
 
@@ -38,6 +43,14 @@ async def test_read_offset_and_limit(ctx: ToolContext) -> None:
     out = await read(ctx, "f.txt", offset=3, limit=2)
     assert out == "line 3\nline 4\n\n[6 more lines in file. Use offset=5 to continue.]"
     assert await read(ctx, "f.txt", offset=10) == "line 10"
+
+
+async def test_read_details_describe_the_page(ctx: ToolContext) -> None:
+    (ctx.workspace / "f.txt").write_text("\n".join(f"line {i}" for i in range(1, 11)))
+    page = await read_result(ctx, "f.txt", offset=3, limit=2)
+    assert page.details == {"path": "f.txt", "first_line": 3, "last_line": 4, "total_lines": 10, "truncated": True}
+    rest = await read_result(ctx, "f.txt", offset=5)
+    assert rest.details is not None and rest.details["last_line"] == 10 and not rest.details["truncated"]
 
 
 async def test_read_truncates_at_line_limit(ctx: ToolContext) -> None:

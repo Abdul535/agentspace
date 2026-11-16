@@ -94,6 +94,8 @@ class ToolResultMessage(BaseModel):
     tool_call_id: str
     tool_name: str
     content: list[TextContent]
+    details: dict[str, Any] | None = None
+    """The tool's structured facts for the UI; providers never send this to the model."""
     is_error: bool = False
     timestamp: int = Field(default_factory=now_ms)
 

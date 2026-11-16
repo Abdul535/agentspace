@@ -830,6 +830,18 @@
             "type": "array",
             "title": "Content"
           },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
           "is_error": {
             "type": "boolean",
             "title": "Is Error",

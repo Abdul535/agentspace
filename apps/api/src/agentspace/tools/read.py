@@ -1,12 +1,12 @@
 """The `read` tool. Same limits and paging as pi's `packages/coding-agent/src/core/tools/read.ts`, text files only."""
 
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from asyncer import asyncify
 from pydantic import BaseModel, Field
 
-from agentspace.agent.tool import Tool, ToolContext, ToolError
+from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
 from agentspace.tools.paths import resolve_in_workspace
 
 # Output caps per call, so one read can't flood the model's context; whichever is hit first wins.
@@ -37,15 +37,18 @@ class ReadTool(Tool[ReadParams]):
     )
     params = ReadParams
 
-    async def execute(self, args: ReadParams, ctx: ToolContext) -> str:
+    async def execute(self, args: ReadParams, ctx: ToolContext) -> ToolResult:
         """Read the file off the event loop."""
         path = resolve_in_workspace(ctx.workspace, args.path)
         # TS: the file I/O below blocks (like fs.readFileSync); asyncify runs it on a worker thread and awaits it.
         return await asyncify(read_text_page)(path, args.path, args.offset, args.limit)
 
 
-def read_text_page(path: Path, shown_path: str, offset: int | None, limit: int | None) -> str:
-    """The requested lines, cut at the caps, with a note saying where to continue."""
+def read_text_page(path: Path, shown_path: str, offset: int | None, limit: int | None) -> ToolResult:
+    """The requested lines, cut at the caps, with a note saying where to continue.
+
+    `details` holds the shown line range, the file's line count and whether more is left.
+    """
     # TS: f"...{x}..." strings are template literals: `...${x}...`.
     if not path.exists():
         raise ToolError(f"File not found: {shown_path}")
@@ -56,7 +59,7 @@ def read_text_page(path: Path, shown_path: str, offset: int | None, limit: int |
         raise ToolError(f"{shown_path} looks like a binary file; only text files can be read.")
     lines = data.decode("utf-8", errors="replace").splitlines()
     if not lines:
-        return "(empty file)"
+        return ToolResult.text("(empty file)", page_details(shown_path, 0, 0, 0, truncated=False))
 
     start = (offset or 1) - 1
     if start >= len(lines):
@@ -77,9 +80,10 @@ def read_text_page(path: Path, shown_path: str, offset: int | None, limit: int |
     if not shown:
         line_kb = len(lines[start].encode()) / 1024
         head = lines[start].encode()[:MAX_BYTES].decode(errors="ignore")
-        return (
+        return ToolResult.text(
             f"{head}\n\n[Line {start + 1} is {line_kb:.1f}KB, over the {MAX_BYTES // 1024}KB limit; "
-            "showing its first part only.]"
+            "showing its first part only.]",
+            page_details(shown_path, start + 1, start + 1, len(lines), truncated=True),
         )
 
     # Tell the model how to get the rest, if anything is left.
@@ -89,4 +93,15 @@ def read_text_page(path: Path, shown_path: str, offset: int | None, limit: int |
         text += f"\n\n[Showing lines {start + 1}-{last} of {len(lines)}. Use offset={last + 1} to continue.]"
     elif last < len(lines):
         text += f"\n\n[{len(lines) - last} more lines in file. Use offset={last + 1} to continue.]"
-    return text
+    return ToolResult.text(text, page_details(shown_path, start + 1, last, len(lines), truncated=last < len(lines)))
+
+
+def page_details(path: str, first_line: int, last_line: int, total_lines: int, *, truncated: bool) -> dict[str, Any]:
+    """The `details` of a read: which lines were shown and whether the file goes on."""
+    return {
+        "path": path,
+        "first_line": first_line,
+        "last_line": last_line,
+        "total_lines": total_lines,
+        "truncated": truncated,
+    }

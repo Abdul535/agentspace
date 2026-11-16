@@ -1,0 +1,139 @@
+# ADR-003 — Agent loop and tools roadmap: pi parity, one step at a time
+
+- **Status:** Proposed
+- **Date:** 2026-11-17
+- **Deciders:** project owner
+
+## Context
+ADR-001 built a minimal loop (`agent/loop.py`): stream a reply, run its tool calls
+one at a time, repeat until no tool calls or `max_turns`. It has two tools (`read`,
+`write`), no hooks, and a run tied to its HTTP request. ADR-001's consequences list
+what is missing.
+
+pi's loop (`../pi-upstream/packages/agent/src/agent-loop.ts`, config in `types.ts`,
+stateful wrapper in `agent.ts`) and its tools
+(`packages/coding-agent/src/core/tools/`) show the full feature set. The owner wants
+every gap listed here as an ordered roadmap, to build one item per step. Each item
+names the pi file to read first.
+
+## Decision
+We grow `agent/` and `tools/` toward pi's design in the order below. Each step is
+small enough for one change and leaves the app working. A step that changes an
+architectural choice gets its own ADR. Small steps only tick their box here.
+
+The extension points keep pi's names in snake_case (`before_tool_call`,
+`transform_context`, …), as optional fields on one `LoopConfig` passed to
+`run_agent`, so the loop does not grow a long parameter list.
+
+### Phase 1 — Tools
+1. [x] **Structured tool results.** `execute` returns a `ToolResult`
+   (`content` blocks for the model, `details` for the UI, `is_error`)
+   instead of `str`. Keep `ToolError` for the simple failure case. `details` is
+   saved on `ToolResultMessage` and never sent to the provider.
+   *pi:* `AgentToolResult` in `agent/src/types.ts`.
+2. [ ] **`edit` tool.** `path` + `edits[{old_text, new_text}]`. Each `old_text` is
+   unique and non-overlapping, and matched against the original file. Return a diff
+   in `details`. *pi:* `tools/edit.ts`, `edit-diff.ts`.
+3. [ ] **`bash` tool.** `command` + `timeout?`, with `cwd` set to the workspace.
+   Keep the tail of the output (2000 lines / 50 KB) and save the full output to a
+   file when it is cut. Kill the process tree on timeout or cancel. Commands run
+   on the host with the API's permissions, so this needs step 7 (permissions) or
+   a sandbox before anyone else can reach the app.
+   *pi:* `tools/bash.ts`, `core/bash-executor.ts`, `tools/truncate.ts`.
+4. [ ] **`grep`, `find`, `ls` tools.** Read-only, respect `.gitignore`, and have
+   result limits. *pi:* `tools/grep.ts`, `find.ts`, `ls.ts`.
+5. [ ] **Tool sets.** Name presets: `coding` = read, bash, edit, write and
+   `read_only` = read, grep, find, ls. Store the chosen set on the session.
+   *pi:* `tools/index.ts`, `DEFAULT_TOOL_NAMES` in `core/settings-manager.ts`.
+6. [ ] **System prompt from tools.** Each tool adds a short snippet and guidelines
+   to the system prompt. *pi:* `promptSnippet`/`promptGuidelines` on each tool,
+   `core/system-prompt.ts`.
+
+### Phase 2 — Loop control
+7. [ ] **`before_tool_call` / `after_tool_call` hooks.** Called after argument
+   validation. `before` can return `block` + `reason` (shown to the model as an
+   error result), and `after` can override fields of the result. This is the base
+   for permission rules, such as asking before running `bash`.
+   *pi:* `prepareToolCall` and `finalizeExecutedToolCall` in `agent-loop.ts`.
+8. [ ] **`prepare_arguments`.** An optional per-tool fix-up of raw arguments before
+   validation, for models that send slightly wrong shapes.
+   *pi:* `prepareToolCallArguments`.
+9. [ ] **Parallel tool execution.** Prepare calls in order, run them with
+   `asyncio.gather` / `TaskGroup`, and emit results in the model's call order. A
+   per-tool `execution_mode = "sequential"` forces the whole batch to run in order.
+   Writes to the same file are serialized.
+   *pi:* `executeToolCallsParallel`, `tools/file-mutation-queue.ts`.
+10. [ ] **Tool progress events.** Add an `on_update` callback to `execute` and a
+    `tool_execution_update` event, for example to stream bash output live.
+    *pi:* `emitToolExecutionUpdate`.
+11. [ ] **Early termination.** Add `terminate` to `ToolResult`, and stop after a
+    batch when every result in it sets it. *pi:* `shouldTerminateToolBatch`.
+12. [ ] **`finish_turn` hook.** Can return `end` or `continue` after each turn.
+    It replaces the hard `max_turns` cut with a policy. *pi:* `FinishTurn`.
+
+### Phase 3 — Runs that outlive the request
+13. [ ] **Background runs.** A run is an `asyncio` task owned by the server, not
+    by the request. Clients subscribe to its events and can reconnect, and an
+    explicit `POST /sessions/{id}/abort` cancels it. Move the run lock into the
+    database so the API can run with several workers. Needs its own ADR, because
+    it supersedes ADR-001's "closing the connection cancels the run".
+14. [ ] **Steering and follow-up queues.** `steer(msg)` is added after the current
+    turn, and `follow_up(msg)` runs once the agent would otherwise stop. Each queue
+    has a `QueueMode` of `all` or `one_at_a_time`. Exposed through API routes and
+    the web input box. Needs step 13.
+    *pi:* `getSteeringMessages`, `getFollowUpMessages`, the outer loop in `runLoop`,
+    `steer`/`followUp` in `agent.ts`.
+15. [ ] **Continue.** Resume from a transcript that ends in a user or tool-result
+    message without a new prompt, for retry after an error.
+    *pi:* `agentLoopContinue`.
+
+### Phase 4 — Context and models
+16. [ ] **Custom message types + `convert_to_llm`.** The transcript can hold
+    app-only messages (notices, bash run by the user, summaries) that are turned
+    into LLM messages or dropped at the LLM-call boundary.
+    *pi:* `CustomAgentMessages`, `core/messages.ts`.
+17. [ ] **`transform_context` + compaction.** When the context nears the model's
+    window, summarize older messages into one summary message and keep recent turns.
+    *pi:* `core/compaction/`, `prepareNextTurn`.
+18. [ ] **Thinking / reasoning.** Thinking content blocks in `AssistantMessage`, a
+    per-session `thinking_level`, and thinking deltas streamed to the UI.
+    *pi:* `ThinkingLevel`, `thinking_*` events.
+19. [ ] **`prepare_request`.** Swap the model, thinking level or context right
+    before each provider call, for example a cheaper model for simple turns.
+    *pi:* `PrepareRequest`.
+20. [ ] **More providers + `get_api_key`.** An Anthropic Messages adapter and
+    per-call key lookup. *pi:* `packages/ai/src/providers/`.
+21. [ ] **Images.** Image content in user messages, `read` returning images, and a
+    switch to block images for models that cannot take them.
+    *pi:* `read.ts`, `blockImages` in `core/sdk.ts`.
+
+### Phase 5 — Extending the agent
+22. [ ] **Changing tools mid-session.** Announce tools added or removed to the
+    model through a system message, so the transcript replays the right tool set.
+    *pi:* `declareToolChanges`.
+23. [ ] **Skills.** Load skill folders (`SKILL.md`) and list them in the system
+    prompt, and let the model read one on demand. *pi:* `core/skills.ts`.
+24. [ ] **MCP tools.** Turn an MCP server's tools into `Tool`s.
+    *pi:* `packages/mcp`, `extensions/mcp/tools.ts`.
+25. [ ] **Branching.** Fork a session from any message using the existing
+    `parent_id` chain. *pi:* `core/session-manager.ts`.
+
+## Alternatives considered
+- **Build features as needed, with no roadmap** — less up-front writing, but the
+  order matters (bash before permissions is unsafe; queues need background runs),
+  and that is easy to lose without a list.
+- **Port pi's loop in one go** — reaches parity quickly, but it is ~950 lines of
+  TypeScript to learn while learning Python. It would also go against the "one step
+  at a time" rule.
+- **One ADR per feature, written up front** — precise, but they would go stale
+  before they are built. Instead, ADRs are written when a step changes the
+  architecture (13 at least).
+
+## Consequences
+- Steps are numbered and checked off here as they land. Reordering is fine, but
+  keep the dependencies: 3 needs 7 before the app is exposed, 14 needs 13, and
+  17 needs 16.
+- `run_agent` moves from loose keyword arguments to a `LoopConfig` as hooks arrive.
+  `execute`'s return type changes in step 1, which touches `read` and `write`.
+- Step 13 will supersede part of ADR-001. Everything else extends ADR-001 without
+  changing its decisions.
