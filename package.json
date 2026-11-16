@@ -1,0 +1,11 @@
+{
+  "name": "agentspace",
+  "private": true,
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "build:web": "pnpm --filter web build",
+    "lint:web": "pnpm --filter web lint",
+    "gen:api": "uv run --project apps/api python apps/api/scripts/export_openapi.py > apps/web/openapi.json && pnpm --filter web gen:api"
+  },
+  "packageManager": "pnpm@10.25.0"
+}

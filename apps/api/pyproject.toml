@@ -1,0 +1,45 @@
+[project]
+name = "agentspace"
+version = "0.1.0"
+description = "agentspace API: agents, sessions and the agent loop"
+readme = "README.md"
+authors = [
+    { name = "Abdullah", email = "syedabdullah535@gmail.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.22.1",
+    "alembic>=1.20.1",
+    "asyncer>=0.0.20",
+    "fastapi[standard]>=0.163.1",
+    "greenlet>=3.5.6",
+    "httpx>=0.28.1",
+    "pydantic-settings>=2.16.3",
+    "sqlmodel>=0.0.50",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.5",
+]
+
+[tool.fastapi]
+entrypoint = "agentspace.main:app"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "FAST"]
+
+[tool.ruff.lint.per-file-ignores]
+# `session_id` reaches these routes through the SessionRowDep / RunDep dependencies.
+"src/agentspace/api/sessions.py" = ["FAST003"]

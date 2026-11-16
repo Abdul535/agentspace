@@ -1,0 +1,992 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "agentspace",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/sessions": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "List Sessions",
+        "description": "All sessions, most recently active first.",
+        "operationId": "list_sessions_sessions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionPublic"
+                  },
+                  "type": "array",
+                  "title": "Response List Sessions Sessions Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Create Session",
+        "description": "Create a session; the provider must be registered.",
+        "operationId": "create_session_sessions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPublic"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Get Session",
+        "description": "One session and its transcript.",
+        "operationId": "get_session_sessions__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/messages": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Send Message",
+        "description": "Run the agent on a new user message and stream its events as SSE.\n\nEach SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.\nMessages are saved as each one ends, so a dropped connection keeps everything\nfinished before it, and the run stops with the connection.",
+        "operationId": "send_message_sessions__session_id__messages_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "string",
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "$ref": "#/components/schemas/AgentEvent"
+                      }
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AgentEndEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "agent_end",
+            "title": "Type",
+            "default": "agent_end"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/EndReason"
+          },
+          "new_messages": {
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "type": "array",
+            "title": "New Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "new_messages"
+        ],
+        "title": "AgentEndEvent",
+        "description": "The run is over; lists every message it added to the transcript."
+      },
+      "AgentEvent": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/AgentStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/TurnStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/MessageStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/MessageUpdateEvent"
+          },
+          {
+            "$ref": "#/components/schemas/MessageEndEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ToolExecutionStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/ToolExecutionEndEvent"
+          },
+          {
+            "$ref": "#/components/schemas/TurnEndEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AgentEndEvent"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "agent_end": "#/components/schemas/AgentEndEvent",
+            "agent_start": "#/components/schemas/AgentStartEvent",
+            "message_end": "#/components/schemas/MessageEndEvent",
+            "message_start": "#/components/schemas/MessageStartEvent",
+            "message_update": "#/components/schemas/MessageUpdateEvent",
+            "tool_execution_end": "#/components/schemas/ToolExecutionEndEvent",
+            "tool_execution_start": "#/components/schemas/ToolExecutionStartEvent",
+            "turn_end": "#/components/schemas/TurnEndEvent",
+            "turn_start": "#/components/schemas/TurnStartEvent"
+          }
+        }
+      },
+      "AgentStartEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "agent_start",
+            "title": "Type",
+            "default": "agent_start"
+          }
+        },
+        "type": "object",
+        "title": "AgentStartEvent",
+        "description": "A run started."
+      },
+      "AssistantMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "const": "assistant",
+            "title": "Role",
+            "default": "assistant"
+          },
+          "content": {
+            "items": {
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/TextContent"
+                },
+                {
+                  "$ref": "#/components/schemas/ToolCall"
+                }
+              ],
+              "discriminator": {
+                "propertyName": "type",
+                "mapping": {
+                  "text": "#/components/schemas/TextContent",
+                  "tool_call": "#/components/schemas/ToolCall"
+                }
+              }
+            },
+            "type": "array",
+            "title": "Content",
+            "default": []
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/Usage",
+            "default": {
+              "input": 0,
+              "output": 0,
+              "total": 0
+            }
+          },
+          "stop_reason": {
+            "$ref": "#/components/schemas/StopReason",
+            "default": "stop"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "AssistantMessage",
+        "description": "One model reply: text and tool calls, plus how and why it ended."
+      },
+      "EndReason": {
+        "type": "string",
+        "enum": [
+          "done",
+          "max_turns",
+          "error",
+          "aborted"
+        ]
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Message": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserMessage"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantMessage"
+          },
+          {
+            "$ref": "#/components/schemas/ToolResultMessage"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "role",
+          "mapping": {
+            "assistant": "#/components/schemas/AssistantMessage",
+            "tool_result": "#/components/schemas/ToolResultMessage",
+            "user": "#/components/schemas/UserMessage"
+          }
+        }
+      },
+      "MessageEndEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "message_end",
+            "title": "Type",
+            "default": "message_end"
+          },
+          "message": {
+            "$ref": "#/components/schemas/Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "MessageEndEvent",
+        "description": "A message is complete; this is the point where it gets saved."
+      },
+      "MessageStartEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "message_start",
+            "title": "Type",
+            "default": "message_start"
+          },
+          "message": {
+            "$ref": "#/components/schemas/Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "MessageStartEvent",
+        "description": "A message began; for an assistant reply the message is still empty."
+      },
+      "MessageUpdateEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "message_update",
+            "title": "Type",
+            "default": "message_update"
+          },
+          "event": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/TextDeltaEvent"
+              },
+              {
+                "$ref": "#/components/schemas/ToolCallEndEvent"
+              }
+            ],
+            "title": "Event",
+            "discriminator": {
+              "propertyName": "type",
+              "mapping": {
+                "text_delta": "#/components/schemas/TextDeltaEvent",
+                "tool_call_end": "#/components/schemas/ToolCallEndEvent"
+              }
+            }
+          }
+        },
+        "type": "object",
+        "required": [
+          "event"
+        ],
+        "title": "MessageUpdateEvent",
+        "description": "Assistant messages only: one streamed piece of the message being generated."
+      },
+      "PromptCreate": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "PromptCreate",
+        "description": "A new user message to run the agent on."
+      },
+      "SessionCreate": {
+        "properties": {
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "system_prompt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "System Prompt"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "title": "SessionCreate",
+        "description": "Fields for a new session; anything left out uses the app's defaults."
+      },
+      "SessionDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "system_prompt": {
+            "type": "string",
+            "title": "System Prompt"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "type": "array",
+            "title": "Messages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "provider",
+          "model",
+          "system_prompt",
+          "created_at",
+          "updated_at",
+          "messages"
+        ],
+        "title": "SessionDetail",
+        "description": "A session with its full transcript."
+      },
+      "SessionPublic": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "system_prompt": {
+            "type": "string",
+            "title": "System Prompt"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "provider",
+          "model",
+          "system_prompt",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "SessionPublic",
+        "description": "A session as the API returns it."
+      },
+      "StopReason": {
+        "type": "string",
+        "enum": [
+          "stop",
+          "length",
+          "tool_use",
+          "error",
+          "aborted"
+        ]
+      },
+      "TextContent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "text",
+            "title": "Type",
+            "default": "text"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "TextContent",
+        "description": "A block of plain text in a message."
+      },
+      "TextDeltaEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "text_delta",
+            "title": "Type",
+            "default": "text_delta"
+          },
+          "delta": {
+            "type": "string",
+            "title": "Delta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "delta"
+        ],
+        "title": "TextDeltaEvent",
+        "description": "A new piece of reply text."
+      },
+      "ToolCall": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tool_call",
+            "title": "Type",
+            "default": "tool_call"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Arguments",
+            "default": {}
+          },
+          "arguments_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arguments Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "ToolCall",
+        "description": "The model asking to run one tool with JSON arguments."
+      },
+      "ToolCallEndEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tool_call_end",
+            "title": "Type",
+            "default": "tool_call_end"
+          },
+          "tool_call": {
+            "$ref": "#/components/schemas/ToolCall"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_call"
+        ],
+        "title": "ToolCallEndEvent",
+        "description": "A tool call whose arguments finished streaming."
+      },
+      "ToolExecutionEndEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tool_execution_end",
+            "title": "Type",
+            "default": "tool_execution_end"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ToolResultMessage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "result"
+        ],
+        "title": "ToolExecutionEndEvent",
+        "description": "A tool call finished, successfully or with an error result."
+      },
+      "ToolExecutionStartEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tool_execution_start",
+            "title": "Type",
+            "default": "tool_execution_start"
+          },
+          "tool_call_id": {
+            "type": "string",
+            "title": "Tool Call Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "arguments": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Arguments"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_call_id",
+          "tool_name",
+          "arguments"
+        ],
+        "title": "ToolExecutionStartEvent",
+        "description": "A tool call started running."
+      },
+      "ToolResultMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "const": "tool_result",
+            "title": "Role",
+            "default": "tool_result"
+          },
+          "tool_call_id": {
+            "type": "string",
+            "title": "Tool Call Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "content": {
+            "items": {
+              "$ref": "#/components/schemas/TextContent"
+            },
+            "type": "array",
+            "title": "Content"
+          },
+          "is_error": {
+            "type": "boolean",
+            "title": "Is Error",
+            "default": false
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_call_id",
+          "tool_name",
+          "content"
+        ],
+        "title": "ToolResultMessage",
+        "description": "What one tool call returned, sent back to the model as the next message."
+      },
+      "TurnEndEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "turn_end",
+            "title": "Type",
+            "default": "turn_end"
+          },
+          "turn": {
+            "type": "integer",
+            "title": "Turn"
+          },
+          "message": {
+            "$ref": "#/components/schemas/AssistantMessage"
+          },
+          "tool_results": {
+            "items": {
+              "$ref": "#/components/schemas/ToolResultMessage"
+            },
+            "type": "array",
+            "title": "Tool Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "turn",
+          "message",
+          "tool_results"
+        ],
+        "title": "TurnEndEvent",
+        "description": "A turn finished: the reply and the results of its tool calls."
+      },
+      "TurnStartEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "turn_start",
+            "title": "Type",
+            "default": "turn_start"
+          },
+          "turn": {
+            "type": "integer",
+            "title": "Turn"
+          }
+        },
+        "type": "object",
+        "required": [
+          "turn"
+        ],
+        "title": "TurnStartEvent",
+        "description": "A new turn: one model request plus the tool calls it makes."
+      },
+      "Usage": {
+        "properties": {
+          "input": {
+            "type": "integer",
+            "title": "Input",
+            "default": 0
+          },
+          "output": {
+            "type": "integer",
+            "title": "Output",
+            "default": 0
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "Usage",
+        "description": "Token counts the provider reported for one model reply."
+      },
+      "UserMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "const": "user",
+            "title": "Role",
+            "default": "user"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "UserMessage",
+        "description": "A prompt from the person using the session."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

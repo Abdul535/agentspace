@@ -1,0 +1,99 @@
+"""FastAPI dependencies shared by the routes: settings, database, store, provider and run slot."""
+
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request, status
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from agentspace.ai.provider import Provider
+from agentspace.ai.providers import UnknownProviderError, get_provider
+from agentspace.config import Settings
+from agentspace.session.db import open_db
+from agentspace.session.models import SessionRow
+from agentspace.session.store import SessionStore
+
+
+# TS: FastAPI dependency injection. A route parameter typed `XDep` is filled by calling the function in
+# `Depends(...)` on each request, like NestJS providers or a tRPC context.
+def get_settings(request: Request) -> Settings:
+    """The settings the app was created with."""
+    return request.app.state.settings
+
+
+SettingsDep = Annotated[Settings, Depends(get_settings)]  # TS: the type is Settings; Depends says how to get one
+
+
+async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
+    """A DB session for one request, kept open until the response has been sent."""
+    # TS: in a dependency, code after `yield` runs once the response is sent, like a `finally` block.
+    async for db in open_db(request.app.state.db_factory):
+        yield db
+
+
+DBDep = Annotated[AsyncSession, Depends(get_db)]
+
+
+def get_store(db: DBDep) -> SessionStore:
+    """The session store on this request's DB session."""
+    return SessionStore(db)
+
+
+StoreDep = Annotated[SessionStore, Depends(get_store)]
+
+
+def provider_lookup(settings: SettingsDep) -> Callable[[str], Provider]:
+    """Builds a provider by name. Tests override this dependency to inject a fake provider."""
+    return lambda name: get_provider(name, settings)
+
+
+ProviderLookupDep = Annotated[Callable[[str], Provider], Depends(provider_lookup)]
+
+
+async def get_session_row(session_id: str, store: StoreDep) -> SessionRow:
+    """The session named in the path, or a 404."""
+    session = await store.get(session_id)
+    if session is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"Session {session_id} not found.")
+    return session
+
+
+SessionRowDep = Annotated[SessionRow, Depends(get_session_row)]
+
+
+@dataclass(frozen=True)
+class Run:
+    """What a prompt run needs: the session, its provider and its workspace folder."""
+
+    session: SessionRow
+    provider: Provider
+    workspace: Path
+
+
+async def claim_run(
+    request: Request, session: SessionRowDep, settings: SettingsDep, lookup: ProviderLookupDep
+) -> AsyncIterator[Run]:
+    """Hold the session's single run slot until the response finishes streaming.
+
+    Checks run here, before the stream starts, so they can still answer with an
+    HTTP error. The slot lives in this process's memory.
+    """
+    active: set[str] = request.app.state.active_runs
+    if session.id in active:
+        # TS: raising HTTPException ends the request with that status, like `throw new HTTPException(409)` in Hono.
+        raise HTTPException(status.HTTP_409_CONFLICT, "This session is already running a prompt.")
+    try:
+        provider = lookup(session.provider)
+    except UnknownProviderError as exc:
+        # TS: `raise ... from exc` is `throw new Error(msg, { cause: exc })`.
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    active.add(session.id)
+    try:
+        yield Run(session=session, provider=provider, workspace=settings.workspaces_dir / session.id)
+    finally:
+        active.discard(session.id)
+
+
+RunDep = Annotated[Run, Depends(claim_run)]

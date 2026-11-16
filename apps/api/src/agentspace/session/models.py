@@ -1,0 +1,52 @@
+"""Database tables for sessions.
+
+A session's transcript is an append-only list of `messages` rows. Each row
+links to the previous one through `parent_id` (as pi's session entries do), so
+branching can be added later without a schema change; today the chain is linear
+and `seq` orders it.
+"""
+
+import secrets
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlmodel import Field, SQLModel
+
+
+def utcnow() -> datetime:
+    """The current time in UTC, for row timestamps."""
+    return datetime.now(UTC)
+
+
+# TS: like a Drizzle table definition: one class is both the table schema and the row type.
+class SessionRow(SQLModel, table=True):
+    """One session: which provider and model it uses, and its system prompt."""
+
+    __tablename__ = "sessions"
+
+    # TS: `lambda: ...` is an arrow function, here `() => crypto.randomUUID()` without dashes.
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    title: str | None = None
+    provider: str
+    model: str
+    system_prompt: str
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
+
+
+class MessageRow(SQLModel, table=True):
+    """One message of a session's transcript, stored as JSON."""
+
+    __tablename__ = "messages"
+    __table_args__ = (UniqueConstraint("session_id", "seq"),)
+
+    id: str = Field(default_factory=lambda: secrets.token_hex(8), primary_key=True)
+    session_id: str = Field(foreign_key="sessions.id", index=True, ondelete="CASCADE")
+    parent_id: str | None = Field(default=None, foreign_key="messages.id")
+    seq: int
+    role: str
+    data: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
+    """The message itself (`agentspace.ai.messages.Message`), as JSON."""
+    created_at: datetime = Field(default_factory=utcnow)
