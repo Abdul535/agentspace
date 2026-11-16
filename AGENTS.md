@@ -7,7 +7,7 @@ One monorepo:
 - Database: SQLite, accessed from Python with SQLModel (async, aiosqlite). Schema migrations with Alembic in `apps/api/migrations/`. The backend owns the schema; the frontend reaches data only through the API.
 - Package manager for Python: uv. Add deps with `uv add`, run commands with `uv run`; never use pip, poetry or bare `python`/`venv`. Commit `uv.lock`.
 
-Coding-agent skills live in `.agents/skills/` (`.claude/skills` is a symlink to it). Use the `fastapi` skill for backend work and the `make-interfaces-feel-better` skill for frontend UI work. The app is self-hosted: ignore its FastAPI Cloud deployment suggestions.
+Coding-agent skills live in `.agents/skills/`, with a symlink per skill in `.claude/skills/`. Manage them with the `skills` CLI, never by copying files: `npx skills add <owner/repo> --skill <name> -a universal claude-code -y` to add, `npx skills update` to update, `npx skills install` to restore from `skills-lock.json` (commit it). Use the `fastapi` skill for backend work and the `make-interfaces-feel-better` skill for frontend UI work. The app is self-hosted: ignore its FastAPI Cloud deployment suggestions.
 
 ## Rules
 
