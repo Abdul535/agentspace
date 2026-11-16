@@ -56,10 +56,10 @@ async def test_write_then_read_then_answer(tmp_path: Path) -> None:
     assert read_result.details is not None and read_result.details["path"] == "hello.txt"
     assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"
     assert events[-1].new_messages == messages
-    # Every request carries the system prompt, both tools and the transcript so far.
+    # Every request carries the system prompt, every tool and the transcript so far.
     last = provider.contexts[-1]
     assert last.system_prompt == "sys"
-    assert [t.name for t in last.tools] == ["read", "write"]
+    assert [t.name for t in last.tools] == ["read", "write", "edit"]
     assert [m.role for m in last.messages] == ["user", "assistant", "tool_result", "assistant", "tool_result"]
 
 

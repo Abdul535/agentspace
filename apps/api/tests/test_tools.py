@@ -1,8 +1,10 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from agentspace.agent.tool import ToolContext, ToolError, ToolResult
+from agentspace.tools.edit import EditParams, EditTool, Replacement
 from agentspace.tools.read import MAX_BYTES, MAX_LINES, ReadParams, ReadTool
 from agentspace.tools.write import WriteParams, WriteTool
 
@@ -105,3 +107,48 @@ async def test_symlink_out_of_workspace_is_refused(ctx: ToolContext, tmp_path: P
 async def test_absolute_path_inside_workspace_is_allowed(ctx: ToolContext) -> None:
     (ctx.workspace / "f.txt").write_text("ok")
     assert await read(ctx, str(ctx.workspace / "f.txt")) == "ok"
+
+
+async def edit(ctx: ToolContext, path: str, *pairs: tuple[str, str]) -> ToolResult:
+    edits = [Replacement(old_text=old, new_text=new) for old, new in pairs]
+    return await EditTool().execute(EditParams(path=path, edits=edits), ctx)
+
+
+async def test_edit_applies_disjoint_edits_against_the_original(ctx: ToolContext) -> None:
+    (ctx.workspace / "f.py").write_text("a = 1\nb = 2\nc = 3\n")
+    out = await edit(ctx, "f.py", ("c = 3", "c = 30"), ("a = 1", "a = 10"))
+    assert out.content[0].text == "Successfully replaced 2 block(s) in f.py."
+    assert (ctx.workspace / "f.py").read_text() == "a = 10\nb = 2\nc = 30\n"
+    assert out.details is not None and out.details["first_changed_line"] == 1
+    assert "-a = 1\n+a = 10\n" in out.details["patch"] and "+c = 30\n" in out.details["patch"]
+
+
+async def test_edit_keeps_bom_and_crlf(ctx: ToolContext) -> None:
+    (ctx.workspace / "w.txt").write_bytes(b"\xef\xbb\xbfone\r\ntwo\r\nthree\r\n")
+    out = await edit(ctx, "w.txt", ("two\nthree", "2\n3"))
+    assert (ctx.workspace / "w.txt").read_bytes() == b"\xef\xbb\xbfone\r\n2\r\n3\r\n"
+    assert out.details is not None and out.details["first_changed_line"] == 2
+
+
+async def test_edit_errors(ctx: ToolContext) -> None:
+    (ctx.workspace / "f.txt").write_text("x\nx\ny\nz\n")
+    with pytest.raises(ToolError, match="Could not find the text"):
+        await edit(ctx, "f.txt", ("nope", "q"))
+    with pytest.raises(ToolError, match="Found 2 occurrences of the text"):
+        await edit(ctx, "f.txt", ("x", "q"))
+    with pytest.raises(ToolError, match=r"edits\[1\].old_text must not be empty"):
+        await edit(ctx, "f.txt", ("y", "q"), ("", "q"))
+    with pytest.raises(ToolError, match=r"edits\[0\] and edits\[1\] overlap"):
+        await edit(ctx, "f.txt", ("y\nz", "q"), ("z", "q"))
+    with pytest.raises(ToolError, match="No changes made"):
+        await edit(ctx, "f.txt", ("y", "y"))
+    with pytest.raises(ToolError, match="File not found"):
+        await edit(ctx, "missing.txt", ("a", "b"))
+    with pytest.raises(ToolError, match="outside the workspace"):
+        await edit(ctx, "../f.txt", ("a", "b"))
+    assert (ctx.workspace / "f.txt").read_text() == "x\nx\ny\nz\n"
+
+
+async def test_edit_requires_at_least_one_edit() -> None:
+    with pytest.raises(ValidationError):
+        EditParams(path="f.txt", edits=[])

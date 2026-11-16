@@ -31,9 +31,13 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
    instead of `str`. Keep `ToolError` for the simple failure case. `details` is
    saved on `ToolResultMessage` and never sent to the provider.
    *pi:* `AgentToolResult` in `agent/src/types.ts`.
-2. [ ] **`edit` tool.** `path` + `edits[{old_text, new_text}]`. Each `old_text` is
+2. [x] **`edit` tool.** `path` + `edits[{old_text, new_text}]`. Each `old_text` is
    unique and non-overlapping, and matched against the original file. Return a diff
-   in `details`. *pi:* `tools/edit.ts`, `edit-diff.ts`.
+   in `details`. Built with exact matching only. It keeps the BOM and CRLF, and
+   `details` holds a unified `patch` (stdlib `difflib`) + `first_changed_line`.
+   Not built yet: pi's fuzzy match fallback (smart quotes, trailing spaces), and
+   writing back a file with mixed line endings exactly as it was (a file with any
+   CRLF is written back all-CRLF). *pi:* `tools/edit.ts`, `edit-diff.ts`.
 3. [ ] **`bash` tool.** `command` + `timeout?`, with `cwd` set to the workspace.
    Keep the tail of the output (2000 lines / 50 KB) and save the full output to a
    file when it is cut. Kill the process tree on timeout or cancel. Commands run
