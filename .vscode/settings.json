@@ -1,0 +1,4 @@
+{
+  // The backend's uv environment lives in apps/api, not at the repo root, so point the Python extension at it.
+  "python.defaultInterpreterPath": "${workspaceFolder}/apps/api/.venv/bin/python"
+}
