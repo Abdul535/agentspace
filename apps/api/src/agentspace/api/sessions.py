@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterable
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 
@@ -110,7 +110,15 @@ async def update_session(
     return SessionPublic.model_validate(await store.set_model(session, body.model), from_attributes=True)
 
 
-@router.post("/{session_id}/messages", response_class=EventSourceResponse)
+def no_transform(response: Response) -> None:
+    """Forbid proxies from compressing the event stream: gzip holds events back until the stream ends."""
+    # The Next.js server gzips proxied responses unless Cache-Control has `no-transform`.
+    # Set in a dependency because the route's body only runs once the headers are already sent.
+    # It goes out next to FastAPI's own `no-cache`; HTTP reads repeated headers as one list.
+    response.headers["Cache-Control"] = "no-cache, no-transform"
+
+
+@router.post("/{session_id}/messages", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
 async def send_message(
     body: PromptCreate, run: RunDep, store: StoreDep, settings: SettingsDep
 ) -> AsyncIterable[AgentEvent]:

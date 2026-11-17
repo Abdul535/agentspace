@@ -65,6 +65,8 @@ def test_send_message_streams_events_and_persists_the_transcript(
     response = client.post(f"/sessions/{session_id}/messages", json={"content": "Write notes"})
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
+    # Without no-transform, the Next.js proxy gzips the stream and the browser gets every event at the end.
+    assert "no-transform" in response.headers["cache-control"]
     events = sse_events(response.text)
     assert events[0]["type"] == "agent_start"
     assert events[-1]["type"] == "agent_end" and events[-1]["reason"] == "done"
