@@ -4,11 +4,16 @@ A simplified port of pi's `runLoop` (`packages/agent/src/agent-loop.ts`): tools
 run one at a time, each through prepare, execute and finalize with the
 `LoopConfig` hooks, and there are no steering/follow-up queues yet.
 The loop holds no storage; callers persist messages from `message_end` events.
-Cancelling the consuming task stops the run at its current await.
+
+`run_loop` reports events through an `emit` callback, so any code holding it can
+report one (ADR-006). `run_agent` wraps it as an async generator for the SSE
+route; closing or cancelling that generator stops the run at its current await.
 """
 
+import asyncio
+import contextlib
 import copy
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from pydantic import BaseModel, ValidationError
@@ -38,6 +43,11 @@ TRUNCATED_CALL = (
 )
 
 
+# Receives every event the loop reports, in order; awaited, like pi's `AgentEventSink`.
+# TS: type Emit = (event: AgentEvent) => Promise<void>
+type Emit = Callable[[AgentEvent], Awaitable[None]]
+
+
 # TS: an `async function*` taking one options object (`*` = keyword-only); callers `for await` its events.
 async def run_agent(
     *,
@@ -52,7 +62,55 @@ async def run_agent(
     max_tokens: int | None = None,
     config: LoopConfig | None = None,
 ) -> AsyncIterator[AgentEvent]:
-    """Run the agent on one prompt and yield its events until it answers, fails or hits `max_turns`."""
+    """Run the agent on one prompt and yield its events: `run_loop` in a task, like pi's `agentLoop`."""
+    # None marks the end: the loop task finished and no more events are coming.
+    queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+    loop_task = asyncio.create_task(
+        run_loop(
+            provider=provider,
+            model=model,
+            system_prompt=system_prompt,
+            tools=tools,
+            history=history,
+            prompt=prompt,
+            ctx=ctx,
+            max_turns=max_turns,
+            max_tokens=max_tokens,
+            config=config,
+            emit=queue.put,
+        )
+    )
+    # Runs however the task ends (done, raised or cancelled), so the reader below never waits forever.
+    loop_task.add_done_callback(lambda _: queue.put_nowait(None))
+    try:
+        # TS: `:=` assigns inside the condition, like `while ((event = await queue.get()) !== null)`.
+        while (event := await queue.get()) is not None:
+            yield event
+        loop_task.result()  # re-raise an error from inside the loop to the reader
+    finally:
+        # The reader stopped early (client gone, or cancelled): stop the run too.
+        if not loop_task.done():
+            loop_task.cancel()
+            # TS: like `await task.catch(() => {})` for this one error type.
+            with contextlib.suppress(asyncio.CancelledError):
+                await loop_task
+
+
+async def run_loop(
+    *,
+    provider: Provider,
+    model: str,
+    system_prompt: str,
+    tools: Sequence[Tool],
+    history: Sequence[Message],
+    prompt: UserMessage,
+    ctx: ToolContext,
+    max_turns: int,
+    max_tokens: int | None = None,
+    config: LoopConfig | None = None,
+    emit: Emit,
+) -> None:
+    """Run the agent on one prompt until it answers, fails or hits `max_turns`, passing each event to `emit`."""
     # TS: `or` here works like `??`: a LoopConfig is always truthy, so only None falls through.
     config = config or LoopConfig()
     messages: list[Message] = list(history)
@@ -65,24 +123,24 @@ async def run_agent(
         messages.append(message)
         new_messages.append(message)
 
-    yield AgentStartEvent()
-    yield MessageStartEvent(message=prompt)
+    await emit(AgentStartEvent())
+    await emit(MessageStartEvent(message=prompt))
     add(prompt)
-    yield MessageEndEvent(message=prompt)
+    await emit(MessageEndEvent(message=prompt))
 
     reason: EndReason = "max_turns"
     for turn in range(1, max_turns + 1):  # TS: for (let turn = 1; turn <= maxTurns; turn++)
-        yield TurnStartEvent(turn=turn)
+        await emit(TurnStartEvent(turn=turn))
 
         # Stream the model's reply, forwarding text and tool-call pieces as they arrive.
         assistant: AssistantMessage | None = None
-        yield MessageStartEvent(message=AssistantMessage(provider=provider.name, model=model))
+        await emit(MessageStartEvent(message=AssistantMessage(provider=provider.name, model=model)))
         context = Context(system_prompt=system_prompt, messages=messages, tools=tool_specs, max_tokens=max_tokens)
         # TS: for await (const event of provider.stream(...)), then a switch on the event's class.
         async for event in provider.stream(model, context):
             match event:
                 case TextDeltaEvent() | ToolCallEndEvent():
-                    yield MessageUpdateEvent(event=event)
+                    await emit(MessageUpdateEvent(event=event))
                 case DoneEvent() | ErrorEvent():
                     assistant = event.message
         # A well-behaved provider always ends with Done or Error; guard against one that doesn't.
@@ -94,10 +152,10 @@ async def run_agent(
                 error_message="The provider stream ended without a final message.",
             )
         add(assistant)
-        yield MessageEndEvent(message=assistant)
+        await emit(MessageEndEvent(message=assistant))
 
         if assistant.stop_reason in ("error", "aborted"):
-            yield TurnEndEvent(turn=turn, message=assistant, tool_results=[])
+            await emit(TurnEndEvent(turn=turn, message=assistant, tool_results=[]))
             reason = "error" if assistant.stop_reason == "error" else "aborted"
             break
 
@@ -105,24 +163,24 @@ async def run_agent(
         calls = assistant.tool_calls()
         results: list[ToolResultMessage] = []
         for call in calls:
-            yield ToolExecutionStartEvent(tool_call_id=call.id, tool_name=call.name, arguments=call.arguments)
+            await emit(ToolExecutionStartEvent(tool_call_id=call.id, tool_name=call.name, arguments=call.arguments))
             if assistant.stop_reason == "length":
                 result = error_result(call, TRUNCATED_CALL.format(name=call.name))
             else:
                 result = await execute_tool_call(call, tools, ctx, assistant, config)
-            yield ToolExecutionEndEvent(result=result)
-            yield MessageStartEvent(message=result)
+            await emit(ToolExecutionEndEvent(result=result))
+            await emit(MessageStartEvent(message=result))
             add(result)
             results.append(result)
-            yield MessageEndEvent(message=result)
-        yield TurnEndEvent(turn=turn, message=assistant, tool_results=results)
+            await emit(MessageEndEvent(message=result))
+        await emit(TurnEndEvent(turn=turn, message=assistant, tool_results=results))
 
         # A reply without tool calls is the final answer.
         if not calls:
             reason = "done"
             break
 
-    yield AgentEndEvent(reason=reason, new_messages=new_messages)
+    await emit(AgentEndEvent(reason=reason, new_messages=new_messages))
 
 
 @dataclass(frozen=True)

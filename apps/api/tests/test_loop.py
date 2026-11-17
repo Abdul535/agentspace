@@ -1,10 +1,11 @@
 import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 
-from agentspace.agent.events import AgentEndEvent, AgentEvent, MessageEndEvent
+from agentspace.agent.events import AgentEndEvent, AgentEvent, MessageEndEvent, ToolExecutionStartEvent
 from agentspace.agent.hooks import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -12,9 +13,10 @@ from agentspace.agent.hooks import (
     BeforeToolCallResult,
     LoopConfig,
 )
-from agentspace.agent.loop import run_agent
+from agentspace.agent.loop import run_agent, run_loop
 from agentspace.agent.tool import Tool, ToolContext, ToolResult
 from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
+from agentspace.ai.provider import AssistantEvent, Context
 from agentspace.ai.providers.fake import FakeProvider, Reply, text_reply, tool_reply
 from agentspace.tools import TOOL_SETS, build_tools
 
@@ -329,3 +331,81 @@ async def test_edit_with_camel_case_keys_runs_end_to_end(tmp_path: Path) -> None
     result = next(m for m in ended(events) if isinstance(m, ToolResultMessage))
     assert not result.is_error, result.content[0].text
     assert (tmp_path / "f.txt").read_text() == "bye\n"
+
+
+async def test_run_loop_reports_the_same_events_through_emit(tmp_path: Path) -> None:
+    replies: list[Reply] = [tool_reply(call("echo", text="a")), text_reply("ok")]
+    emitted: list[AgentEvent] = []
+
+    async def emit(event: AgentEvent) -> None:
+        emitted.append(event)
+
+    await run_loop(
+        provider=FakeProvider(list(replies)),
+        model="m",
+        system_prompt="sys",
+        tools=[EchoTool()],
+        history=[],
+        prompt=UserMessage(content="go"),
+        ctx=ToolContext(workspace=tmp_path),
+        max_turns=10,
+        emit=emit,
+    )
+    yielded = await run(FakeProvider(list(replies)), tmp_path, tools=[EchoTool()])
+
+    assert [e.type for e in emitted] == [e.type for e in yielded]
+
+
+class BrokenProvider(FakeProvider):
+    """A provider whose stream crashes instead of ending with an error message."""
+
+    async def stream(self, model: str, context: Context) -> AsyncIterator[AssistantEvent]:
+        raise RuntimeError("socket exploded")
+        yield  # unreachable; makes this an async generator like the real stream
+
+
+async def test_an_error_inside_the_loop_reaches_the_reader(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="socket exploded"):
+        await run(BrokenProvider([]), tmp_path)
+
+
+class SlowTool(EchoTool):
+    """Waits forever, and records whether it was cancelled."""
+
+    name = "slow"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+        self.cancelled = False
+
+    async def execute(self, args: EchoParams, ctx: ToolContext) -> ToolResult:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.cancelled = True
+            raise
+        return ToolResult.text("never")
+
+
+async def test_closing_the_reader_early_cancels_the_running_tool(tmp_path: Path) -> None:
+    slow = SlowTool()
+    events = run_agent(
+        provider=FakeProvider([tool_reply(call("slow", text="a")), text_reply("ok")]),
+        model="m",
+        system_prompt="sys",
+        tools=[slow],
+        history=[],
+        prompt=UserMessage(content="go"),
+        ctx=ToolContext(workspace=tmp_path),
+        max_turns=10,
+    )
+    # Read until the call starts, wait for the tool to be running, then stop reading, as a disconnected client does.
+    async for event in events:
+        if isinstance(event, ToolExecutionStartEvent):
+            break
+    await slow.started.wait()
+    await events.aclose()  # TS: like calling `return()` on an async iterator
+
+    assert slow.cancelled
