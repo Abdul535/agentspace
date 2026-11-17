@@ -109,3 +109,25 @@ def test_tool_sets_are_stored_as_names_and_limit_what_the_model_gets(client: Tes
     fake.replies = [text_reply("ok")]
     client.post(f"/sessions/{default['id']}/messages", json={"content": "hi"})
     assert "bash" not in [t.name for t in fake.contexts[-1].tools]
+
+
+def test_switching_model_applies_to_the_next_run(client: TestClient, fake: FakeProvider) -> None:
+    session_id = client.post("/sessions", json={"model": "old/model"}).json()["id"]
+
+    updated = client.patch(f"/sessions/{session_id}", json={"model": "new/model"})
+    assert updated.status_code == 200 and updated.json()["model"] == "new/model"
+    assert client.get(f"/sessions/{session_id}").json()["model"] == "new/model"
+
+    fake.replies = [text_reply("Hi.")]
+    client.post(f"/sessions/{session_id}/messages", json={"content": "hi"})
+    reply = client.get(f"/sessions/{session_id}").json()["messages"][-1]
+    assert reply["role"] == "assistant" and reply["model"] == "new/model"
+
+
+def test_switching_model_is_refused_mid_run_and_validated(client: TestClient) -> None:
+    session_id = client.post("/sessions", json={}).json()["id"]
+    assert client.patch(f"/sessions/{session_id}", json={"model": ""}).status_code == 422
+    assert client.patch("/sessions/nope", json={"model": "a/b"}).status_code == 404
+
+    client.app.state.active_runs.add(session_id)
+    assert client.patch(f"/sessions/{session_id}", json={"model": "a/b"}).status_code == 409

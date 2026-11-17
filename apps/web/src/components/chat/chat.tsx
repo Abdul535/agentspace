@@ -1,12 +1,14 @@
 "use client";
 
-import { AlertCircle } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { AlertCircle, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
+import { ActivityPanel } from "@/components/chat/activity-panel";
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
+import { ModelPicker } from "@/components/chat/model-picker";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/lib/api/queries";
 import { useAgentRun } from "@/lib/api/use-agent-run";
@@ -15,6 +17,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const session = useSession(sessionId);
   const run = useAgentRun(sessionId);
   const messages = [...(session.data?.messages ?? []), ...run.messages];
+  const [activityOpen, setActivityOpen] = useState(true);
 
   // Keep the newest output in view while it streams, unless the reader scrolled up.
   const scroller = useRef<HTMLDivElement>(null);
@@ -37,47 +40,60 @@ export function Chat({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b px-6">
-        {session.data ? (
-          <>
-            <h1 className="truncate text-sm font-medium">{session.data.title ?? "Untitled session"}</h1>
-            <Badge variant="secondary" className="ml-auto font-mono">
-              {session.data.model}
-            </Badge>
-          </>
-        ) : (
-          <Skeleton className="h-4 w-48" />
-        )}
-      </header>
-
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-3xl px-6 py-8">
-          {session.isPending ? (
-            <div className="flex flex-col gap-4">
-              <Skeleton className="h-10 w-1/2 self-end" />
-              <Skeleton className="h-20 w-full" />
-            </div>
-          ) : messages.length === 0 && !run.running ? (
-            <p className="pt-16 text-center text-balance text-muted-foreground">
-              The agent works in this session&apos;s own folder. Ask it to write a file, then read it back.
-            </p>
+    <div className="flex h-full">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b px-6">
+          {session.data ? (
+            <>
+              <h1 className="truncate text-sm font-medium">{session.data.title ?? "Untitled session"}</h1>
+              <ModelPicker sessionId={sessionId} model={session.data.model} running={run.running} />
+            </>
           ) : (
-            <MessageList messages={messages} draft={run.draft} pendingTools={run.pendingTools} />
+            <Skeleton className="mr-auto h-4 w-48" />
           )}
+          {/* Hidden below lg, where the panel itself is hidden. */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="-mr-2 hidden lg:inline-flex"
+            aria-label={activityOpen ? "Hide activity" : "Show activity"}
+            aria-expanded={activityOpen}
+            aria-controls="activity-panel"
+            onClick={() => setActivityOpen((open) => !open)}
+          >
+            {activityOpen ? <PanelRightClose /> : <PanelRightOpen />}
+          </Button>
+        </header>
+
+        <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-3xl px-6 py-8">
+            {session.isPending ? (
+              <div className="flex flex-col gap-4">
+                <Skeleton className="h-10 w-1/2 self-end" />
+                <Skeleton className="h-20 w-full" />
+              </div>
+            ) : messages.length === 0 && !run.running ? (
+              <p className="pt-16 text-center text-balance text-muted-foreground">
+                The agent works in this session&apos;s own folder. Ask it to write a file, then read it back.
+              </p>
+            ) : (
+              <MessageList messages={messages} draft={run.draft} pendingTools={run.pendingTools} />
+            )}
+          </div>
+        </div>
+
+        <div className="mx-auto w-full max-w-3xl px-6 pb-6">
+          {run.error && (
+            <Alert variant="destructive" className="mb-3">
+              <AlertCircle />
+              <AlertTitle>Couldn&apos;t send</AlertTitle>
+              <AlertDescription>{run.error}</AlertDescription>
+            </Alert>
+          )}
+          <Composer running={run.running} onSend={run.send} onStop={run.stop} />
         </div>
       </div>
-
-      <div className="mx-auto w-full max-w-3xl px-6 pb-6">
-        {run.error && (
-          <Alert variant="destructive" className="mb-3">
-            <AlertCircle />
-            <AlertTitle>Couldn&apos;t send</AlertTitle>
-            <AlertDescription>{run.error}</AlertDescription>
-          </Alert>
-        )}
-        <Composer running={run.running} onSend={run.send} onStop={run.stop} />
-      </div>
+      {activityOpen && <ActivityPanel messages={messages} draft={run.draft} pendingTools={run.pendingTools} />}
     </div>
   );
 }

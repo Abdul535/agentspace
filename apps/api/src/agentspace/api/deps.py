@@ -1,4 +1,4 @@
-"""FastAPI dependencies shared by the routes: settings, database, store, provider and run slot."""
+"""FastAPI dependencies shared by the routes: settings, database, store, provider, model catalog and run slot."""
 
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -8,6 +8,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, status
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.ai.provider import Provider
 from agentspace.ai.providers import UnknownProviderError, get_provider
 from agentspace.config import Settings
@@ -50,6 +51,14 @@ def provider_lookup(settings: SettingsDep) -> Callable[[str], Provider]:
 
 
 ProviderLookupDep = Annotated[Callable[[str], Provider], Depends(provider_lookup)]
+
+
+def get_catalog(request: Request) -> OpenRouterCatalog:
+    """The app-wide model catalog, so its cache is shared by every request. Tests override this."""
+    return request.app.state.model_catalog
+
+
+CatalogDep = Annotated[OpenRouterCatalog, Depends(get_catalog)]
 
 
 async def get_session_row(session_id: str, store: StoreDep) -> SessionRow:

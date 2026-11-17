@@ -1,9 +1,9 @@
-"""HTTP routes for sessions: create, list, read, and send a prompt."""
+"""HTTP routes for sessions: create, list, read, switch model, and send a prompt."""
 
 from collections.abc import AsyncIterable
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 
@@ -51,6 +51,12 @@ class SessionDetail(SessionPublic):
     messages: list[Message]
 
 
+class SessionUpdate(BaseModel):
+    """Fields to change on a session; only `model` for now (ADR-005)."""
+
+    model: str = Field(min_length=1)
+
+
 class PromptCreate(BaseModel):
     """A new user message to run the agent on."""
 
@@ -91,6 +97,17 @@ async def get_session(session: SessionRowDep, store: StoreDep) -> SessionDetail:
     public = SessionPublic.model_validate(session, from_attributes=True)
     # TS: `**dict` spreads keyword arguments: new SessionDetail({ ...public, messages }).
     return SessionDetail(**public.model_dump(), messages=await store.messages(session.id))
+
+
+@router.patch("/{session_id}")
+async def update_session(
+    body: SessionUpdate, session: SessionRowDep, store: StoreDep, request: Request
+) -> SessionPublic:
+    """Switch the session's model; the next run uses it. 409 while a run is in progress."""
+    # A run reads the model once when it starts, so a switch mid-run would look applied but wasn't.
+    if session.id in request.app.state.active_runs:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the current run to finish before switching models.")
+    return SessionPublic.model_validate(await store.set_model(session, body.model), from_attributes=True)
 
 
 @router.post("/{session_id}/messages", response_class=EventSourceResponse)

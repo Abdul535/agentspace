@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from asyncer import asyncify
 from fastapi import FastAPI
 
+from agentspace.ai.catalog import OpenRouterCatalog
+from agentspace.api.models import router as models_router
 from agentspace.api.sessions import router as sessions_router
 from agentspace.config import Settings, get_settings
 from agentspace.session.db import create_engine, session_factory
@@ -29,11 +31,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.db_factory = session_factory(engine)
         # Ids of sessions with a run in progress (see `claim_run`).
         app.state.active_runs = set()
+        app.state.model_catalog = OpenRouterCatalog(settings.openrouter_base_url)
         yield
         await engine.dispose()
 
     app = FastAPI(title="agentspace", lifespan=lifespan)
     app.include_router(sessions_router)
+    app.include_router(models_router)
     return app
 
 

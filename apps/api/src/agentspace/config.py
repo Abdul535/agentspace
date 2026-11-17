@@ -22,6 +22,8 @@ class Settings(BaseSettings):
 
     default_provider: str = "openrouter"
     default_model: str = "anthropic/claude-sonnet-5.5"
+    favorite_models: list[str] = []
+    """Model ids the picker pins at the top. Set as JSON: `AGENTSPACE_FAVORITE_MODELS='["a/b", "c/d"]'`."""
     default_system_prompt: str = (
         "You are a coding assistant. Help the user inspect files, run commands and change code in their workspace."
     )

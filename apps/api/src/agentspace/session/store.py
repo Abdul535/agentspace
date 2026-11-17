@@ -37,6 +37,13 @@ class SessionStore:
         result = await self.db.exec(select(SessionRow).order_by(col(SessionRow.updated_at).desc()))
         return list(result.all())
 
+    async def set_model(self, session: SessionRow, model: str) -> SessionRow:
+        """Switch the model the session's next runs use."""
+        session.model = model
+        self.db.add(session)
+        await self.db.commit()
+        return session
+
     async def messages(self, session_id: str) -> list[Message]:
         """A session's transcript, oldest message first."""
         result = await self.db.exec(

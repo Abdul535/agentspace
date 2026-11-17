@@ -14,6 +14,7 @@ export type AssistantMessage = Schemas["AssistantMessage"];
 export type ToolResultMessage = Schemas["ToolResultMessage"];
 export type ToolCall = Schemas["ToolCall"];
 export type AgentEvent = Schemas["AgentEvent"];
+export type ModelInfo = Schemas["ModelInfo"];
 
 /** Turn an openapi-fetch error body into a readable message. */
 export function errorMessage(error: unknown): string {

@@ -112,6 +112,57 @@
             }
           }
         }
+      },
+      "patch": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Update Session",
+        "description": "Switch the session's model; the next run uses it. 409 while a run is in progress.",
+        "operationId": "update_session_sessions__session_id__patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionPublic"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/sessions/{session_id}/messages": {
@@ -182,6 +233,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/models": {
+      "get": {
+        "tags": [
+          "models"
+        ],
+        "summary": "List Models",
+        "description": "The catalog; 502 when OpenRouter can't be reached and nothing is cached.",
+        "operationId": "list_models_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelCatalog"
                 }
               }
             }
@@ -466,6 +539,96 @@
         "title": "MessageUpdateEvent",
         "description": "Assistant messages only: one streamed piece of the message being generated."
       },
+      "ModelCatalog": {
+        "properties": {
+          "default_model": {
+            "type": "string",
+            "title": "Default Model"
+          },
+          "favorites": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Favorites"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelInfo"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "default_model",
+          "favorites",
+          "models"
+        ],
+        "title": "ModelCatalog",
+        "description": "Every model a session can switch to, plus which ones to pin."
+      },
+      "ModelInfo": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "context_length": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Length"
+          },
+          "input_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Price"
+          },
+          "output_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Price"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "id",
+          "name",
+          "context_length",
+          "input_price",
+          "output_price"
+        ],
+        "title": "ModelInfo",
+        "description": "One model the picker can offer."
+      },
       "PromptCreate": {
         "properties": {
           "content": {
@@ -671,6 +834,21 @@
         ],
         "title": "SessionPublic",
         "description": "A session as the API returns it."
+      },
+      "SessionUpdate": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Model"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "title": "SessionUpdate",
+        "description": "Fields to change on a session; only `model` for now (ADR-005)."
       },
       "StopReason": {
         "type": "string",

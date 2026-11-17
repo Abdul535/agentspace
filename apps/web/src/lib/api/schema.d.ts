@@ -45,7 +45,11 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Session
+         * @description Switch the session's model; the next run uses it. 409 while a run is in progress.
+         */
+        patch: operations["update_session_sessions__session_id__patch"];
         trace?: never;
     };
     "/sessions/{session_id}/messages": {
@@ -66,6 +70,26 @@ export interface paths {
          *     finished before it, and the run stops with the connection.
          */
         post: operations["send_message_sessions__session_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Models
+         * @description The catalog; 502 when OpenRouter can't be reached and nothing is cached.
+         */
+        get: operations["list_models_models_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -182,6 +206,36 @@ export interface components {
             event: components["schemas"]["TextDeltaEvent"] | components["schemas"]["ToolCallEndEvent"];
         };
         /**
+         * ModelCatalog
+         * @description Every model a session can switch to, plus which ones to pin.
+         */
+        ModelCatalog: {
+            /** Default Model */
+            default_model: string;
+            /** Favorites */
+            favorites: string[];
+            /** Models */
+            models: components["schemas"]["ModelInfo"][];
+        };
+        /**
+         * ModelInfo
+         * @description One model the picker can offer.
+         */
+        ModelInfo: {
+            /** Provider */
+            provider: string;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Context Length */
+            context_length: number | null;
+            /** Input Price */
+            input_price: number | null;
+            /** Output Price */
+            output_price: number | null;
+        };
+        /**
          * PromptCreate
          * @description A new user message to run the agent on.
          */
@@ -261,6 +315,14 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * SessionUpdate
+         * @description Fields to change on a session; only `model` for now (ADR-005).
+         */
+        SessionUpdate: {
+            /** Model */
+            model: string;
         };
         /** @enum {string} */
         StopReason: "stop" | "length" | "tool_use" | "error" | "aborted";
@@ -558,6 +620,41 @@ export interface operations {
             };
         };
     };
+    update_session_sessions__session_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     send_message_sessions__session_id__messages_post: {
         parameters: {
             query?: never;
@@ -589,6 +686,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_models_models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalog"];
                 };
             };
         };
