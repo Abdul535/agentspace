@@ -295,3 +295,37 @@ async def test_cancelling_while_before_tool_call_waits_stops_the_run(tmp_path: P
     with pytest.raises(asyncio.CancelledError):
         await task
     assert echo.ran == []
+
+
+class StrictEchoTool(EchoTool):
+    """EchoTool that also accepts `message` for `text`, and refuses an `explode` argument outright."""
+
+    def prepare_arguments(self, args: dict) -> dict:
+        if "explode" in args:
+            raise ValueError("cannot prepare")
+        if "message" in args:
+            args["text"] = args.pop("message")
+        return args
+
+
+async def test_prepare_arguments_fixes_args_without_changing_the_transcript(tmp_path: Path) -> None:
+    echo = StrictEchoTool()
+    reply = tool_reply(call("echo", "c1", message="hi"), call("echo", "c2", explode=True))
+    events = await run(FakeProvider([reply, text_reply("ok")]), tmp_path, tools=[echo])
+
+    results = [m for m in ended(events) if isinstance(m, ToolResultMessage)]
+    assert echo.ran == ["hi"]
+    assert not results[0].is_error
+    assert results[1].is_error and "cannot prepare" in results[1].content[0].text
+    # The stored call still holds what the model sent.
+    assert reply.tool_calls()[0].arguments == {"message": "hi"}
+
+
+async def test_edit_with_camel_case_keys_runs_end_to_end(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("hello\n")
+    reply = tool_reply(call("edit", path="f.txt", edits='[{"oldText": "hello", "newText": "bye"}]'))
+    events = await run(FakeProvider([reply, text_reply("ok")]), tmp_path)
+
+    result = next(m for m in ended(events) if isinstance(m, ToolResultMessage))
+    assert not result.is_error, result.content[0].text
+    assert (tmp_path / "f.txt").read_text() == "bye\n"

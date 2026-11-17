@@ -7,6 +7,7 @@ The loop holds no storage; callers persist messages from `message_end` events.
 Cancelling the consuming task stops the run at its current await.
 """
 
+import copy
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 
@@ -147,15 +148,21 @@ async def execute_tool_call(
 async def prepare_tool_call(
     call: ToolCall, tools: Sequence[Tool], assistant: AssistantMessage, config: LoopConfig
 ) -> PreparedCall | ToolResultMessage:
-    """Find the tool, validate the arguments, then ask `before_tool_call`. A failure at any check is an error result."""
+    """Find the tool, fix up and validate the arguments, then ask `before_tool_call`. Any failure is an error result."""
     tool = next((t for t in tools if t.name == call.name), None)  # TS: tools.find((t) => t.name === call.name) ?? null
     if tool is None:
         return error_result(call, f"Tool {call.name} not found.")
     if call.arguments_error:
         return error_result(call, f"Invalid arguments for {call.name}: {call.arguments_error}")
+    # A copy, so a tool's fix-ups never rewrite the call stored in the assistant message.
+    # TS: copy.deepcopy is structuredClone.
+    try:
+        raw = tool.prepare_arguments(copy.deepcopy(call.arguments))
+    except Exception as exc:
+        return error_result(call, f"Invalid arguments for {call.name}: {type(exc).__name__}: {exc}")
     # TS: `except X` catches only X, like `catch (e) { if (!(e instanceof X)) throw e; ... }`.
     try:
-        args = tool.params.model_validate(call.arguments)  # TS: schema.parse(call.arguments)
+        args = tool.params.model_validate(raw)  # TS: schema.parse(raw)
     except ValidationError as exc:
         return error_result(call, f"Invalid arguments for {call.name}:\n{exc}")
     if config.before_tool_call is not None:

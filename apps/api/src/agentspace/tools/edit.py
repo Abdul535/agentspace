@@ -4,6 +4,7 @@ pi also retries a failed match with fuzzy normalization (smart quotes, trailing 
 """
 
 import difflib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
@@ -65,11 +66,48 @@ class EditTool(Tool[EditParams]):
         "Keep matches short and non-overlapping; merge nearby changes without including large unchanged regions.",
     )
 
+    def prepare_arguments(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Repair the shapes models often send for `edits`, after pi's `prepareEditArguments`.
+
+        Handles `edits` as a JSON string or as a single object, the old single-edit shape
+        (`old_text`/`new_text` at the top level), and camelCase keys (`oldText`/`newText`).
+        Anything else is left for validation to report.
+        """
+        edits = args.get("edits")
+        if isinstance(edits, str):
+            try:
+                edits = json.loads(edits)
+            except json.JSONDecodeError:
+                pass
+        if isinstance(edits, dict):
+            edits = [edits]
+        legacy = snake_case_edit(args)
+        old, new = legacy.get("old_text"), legacy.get("new_text")
+        if isinstance(old, str) and isinstance(new, str):
+            for key in ("old_text", "new_text", "oldText", "newText"):
+                args.pop(key, None)
+            # TS: `[...(Array.isArray(edits) ? edits : []), { old_text, new_text }]`
+            edits = [*(edits if isinstance(edits, list) else []), {"old_text": old, "new_text": new}]
+        if isinstance(edits, list):
+            edits = [snake_case_edit(edit) if isinstance(edit, dict) else edit for edit in edits]
+        if edits is not None:
+            args["edits"] = edits
+        return args
+
     async def execute(self, args: EditParams, ctx: ToolContext) -> ToolResult:
         """Apply the edits off the event loop; `details` carries a unified diff of the change."""
         path = resolve_in_workspace(ctx.workspace, args.path)
         # TS: edit_file blocks (fs.readFileSync/writeFileSync); asyncify runs it on a worker thread and awaits it.
         return await asyncify(edit_file)(path, args.path, args.edits)
+
+
+def snake_case_edit(edit: dict[str, Any]) -> dict[str, Any]:
+    """`old_text`/`new_text` from an edit object, also accepting `oldText`/`newText`; other keys are kept."""
+    fixed = {key: value for key, value in edit.items() if key not in ("oldText", "newText")}
+    for camel, snake in (("oldText", "old_text"), ("newText", "new_text")):
+        if snake not in fixed and camel in edit:
+            fixed[snake] = edit[camel]
+    return fixed
 
 
 @dataclass(frozen=True)

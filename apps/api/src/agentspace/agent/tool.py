@@ -63,6 +63,14 @@ class Tool[P: BaseModel](ABC):
     async def execute(self, args: P, ctx: ToolContext) -> ToolResult:
         """Run the call. Raise `ToolError`, or return `is_error=True`, to report a failure."""
 
+    # TS: a method with a default body that subclasses may override, like a non-abstract method on an abstract class.
+    def prepare_arguments(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Fix the raw arguments before validation, for models that send slightly wrong shapes. Default: no change.
+
+        Gets a copy, so changing it in place is fine; the transcript keeps what the model sent.
+        """
+        return args
+
     def spec(self) -> ToolSpec:
         """Describe this tool to the model: name, description and argument schema."""
         return ToolSpec(name=self.name, description=self.description, parameters=self.params.model_json_schema())

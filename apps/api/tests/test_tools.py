@@ -152,3 +152,33 @@ async def test_edit_errors(ctx: ToolContext) -> None:
 async def test_edit_requires_at_least_one_edit() -> None:
     with pytest.raises(ValidationError):
         EditParams(path="f.txt", edits=[])
+
+
+def prepared_edits(args: dict) -> list[Replacement]:
+    """Run EditTool's argument repair, then validate, as the loop does."""
+    return EditParams.model_validate(EditTool().prepare_arguments(args)).edits
+
+
+def test_edit_repairs_common_argument_shapes() -> None:
+    one = [Replacement(old_text="a", new_text="b")]
+    # edits as a JSON string: a list, or a single object
+    assert prepared_edits({"path": "f", "edits": '[{"old_text": "a", "new_text": "b"}]'}) == one
+    assert prepared_edits({"path": "f", "edits": '{"old_text": "a", "new_text": "b"}'}) == one
+    # a single object instead of a list
+    assert prepared_edits({"path": "f", "edits": {"old_text": "a", "new_text": "b"}}) == one
+    # camelCase keys, inside edits or at the top level
+    assert prepared_edits({"path": "f", "edits": [{"oldText": "a", "newText": "b"}]}) == one
+    assert prepared_edits({"path": "f", "oldText": "a", "newText": "b"}) == one
+    # the old single-edit shape is appended after any edits already given
+    xy = {"old_text": "x", "new_text": "y"}
+    both = prepared_edits({"path": "f", "edits": [xy], "old_text": "a", "new_text": "b"})
+    assert both == [Replacement(old_text="x", new_text="y"), *one]
+
+
+def test_edit_leaves_unfixable_arguments_for_validation() -> None:
+    with pytest.raises(ValidationError):
+        prepared_edits({"path": "f", "edits": "[not json"})
+    with pytest.raises(ValidationError):
+        prepared_edits({"path": "f", "edits": [{"old_text": "a"}]})
+    valid = {"path": "f", "edits": [{"old_text": "a", "new_text": "b"}]}
+    assert EditTool().prepare_arguments(dict(valid)) == valid

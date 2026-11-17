@@ -105,9 +105,15 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
    - A `before` that raises blocks the call; an `after` that raises replaces the
      result with an error. Cancellation passes through both (`except Exception`).
    - Not built: `terminate` on a block (step 11), and any policy using the hooks.
-8. [ ] **`prepare_arguments`.** An optional per-tool fix-up of raw arguments before
+8. [x] **`prepare_arguments`.** An optional per-tool fix-up of raw arguments before
    validation, for models that send slightly wrong shapes.
    *pi:* `prepareToolCallArguments`.
+   Built as follows:
+   - `Tool.prepare_arguments(args)` defaults to no change. The loop calls it on a
+     deep copy of the raw arguments, so the transcript keeps what the model sent;
+     a raise becomes an error result.
+   - `edit` repairs `edits` sent as a JSON string or a single object, the old
+     top-level `old_text`/`new_text` shape, and camelCase `oldText`/`newText`.
 9. [ ] **Parallel tool execution.** Prepare calls in order, run them with
    `asyncio.gather` / `TaskGroup`, and emit results in the model's call order. A
    per-tool `execution_mode = "sequential"` forces the whole batch to run in order.
