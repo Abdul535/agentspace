@@ -128,9 +128,17 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
      finishes, then the result messages in call order.
    - `tools/file_lock.py`: one `asyncio.Lock` per resolved path, held by `write`
      and by `edit`'s whole read-modify-write.
-10. [ ] **Tool progress events.** Add an `on_update` callback to `execute` and a
+10. [x] **Tool progress events.** Add an `on_update` callback to `execute` and a
     `tool_execution_update` event, for example to stream bash output live.
     *pi:* `emitToolExecutionUpdate`.
+    Built as follows:
+    - `on_update` is an async field on `ToolContext`, not a new `execute`
+      argument, so tools that don't report progress are unchanged. The loop
+      gives each call its own copy and ignores updates after `execute` returns.
+    - `ToolExecutionUpdateEvent` carries a snapshot (`partial: ToolResult`), not
+      a delta. Updates are streamed, never sent to the model or saved.
+    - `bash` checks its output file every 100 ms and sends the last 8 KB when it
+      grew. The web app shows the latest snapshot inside the running tool call.
 11. [ ] **Early termination.** Add `terminate` to `ToolResult`, and stop after a
     batch when every result in it sets it. *pi:* `shouldTerminateToolBatch`.
 12. [ ] **`finish_turn` hook.** Can return `end` or `continue` after each turn.

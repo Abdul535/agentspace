@@ -7,7 +7,7 @@ import pytest
 
 from agentspace.agent.tool import ToolContext, ToolResult
 from agentspace.tools import TOOL_SETS, build_tools
-from agentspace.tools.bash import BashParams, BashTool
+from agentspace.tools.bash import BashParams, BashTool, read_tail
 from agentspace.tools.read import MAX_BYTES, MAX_LINES
 
 pytestmark = pytest.mark.anyio
@@ -112,3 +112,26 @@ def assert_dead(pid: int) -> None:
 def test_bash_needs_the_server_switch_whatever_the_session_stores() -> None:
     assert [t.name for t in build_tools(TOOL_SETS["coding"], bash=False)] == ["read", "edit", "write"]
     assert [t.name for t in build_tools(TOOL_SETS["coding"], bash=True)] == ["read", "bash", "edit", "write"]
+
+
+async def test_running_command_streams_its_output_so_far(ctx: ToolContext) -> None:
+    updates: list[str] = []
+
+    async def on_update(partial: ToolResult) -> None:
+        updates.append(text(partial))
+
+    live = ToolContext(workspace=ctx.workspace, on_update=on_update)
+    result = await BashTool().execute(BashParams(command="for i in 1 2 3; do echo line $i; sleep 0.15; done"), live)
+
+    assert text(result) == "line 1\nline 2\nline 3"
+    assert len(updates) >= 2
+    assert updates[0].startswith("line 1")
+    # Each update is a snapshot of everything so far, so each one extends the last.
+    assert all(later.startswith(earlier) for earlier, later in zip(updates, updates[1:], strict=False))
+
+
+def test_read_tail_starts_at_a_line_break_when_it_cuts(tmp_path: Path) -> None:
+    log = tmp_path / "out.log"
+    log.write_text("first line\nsecond\nthird\n")
+    assert read_tail(log, 1024) == "first line\nsecond\nthird\n"
+    assert read_tail(log, 10) == "third\n"  # "ond\nthird\n" minus the partial "ond"

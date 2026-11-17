@@ -15,10 +15,19 @@ type RunState = {
   draft: string | null;
   /** Tool calls currently executing, by call id. */
   pendingTools: Set<string>;
+  /** Latest live output of running tool calls (e.g. bash so far), by call id. Each update replaces the last. */
+  toolOutput: Map<string, string>;
   error: string | null;
 };
 
-const idle: RunState = { running: false, messages: [], draft: null, pendingTools: new Set(), error: null };
+const idle: RunState = {
+  running: false,
+  messages: [],
+  draft: null,
+  pendingTools: new Set(),
+  toolOutput: new Map(),
+  error: null,
+};
 
 /** Run prompts against one session, exposing the live state of the current run. */
 export function useAgentRun(sessionId: string) {
@@ -45,10 +54,17 @@ export function useAgentRun(sessionId: string) {
               return { ...s, messages: [...s.messages, event.message], draft: null };
             case "tool_execution_start":
               return { ...s, pendingTools: new Set(s.pendingTools).add(event.tool_call_id) };
+            case "tool_execution_update": {
+              const text = event.partial.content.map((block) => block.text).join("");
+              return { ...s, toolOutput: new Map(s.toolOutput).set(event.tool_call_id, text) };
+            }
             case "tool_execution_end": {
               const pendingTools = new Set(s.pendingTools);
               pendingTools.delete(event.result.tool_call_id);
-              return { ...s, pendingTools };
+              // The result message replaces the live output.
+              const toolOutput = new Map(s.toolOutput);
+              toolOutput.delete(event.result.tool_call_id);
+              return { ...s, pendingTools, toolOutput };
             }
             default:
               return s;

@@ -21,7 +21,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
 
   // Keep the newest output in view while it streams, unless the reader scrolled up.
   const scroller = useRef<HTMLDivElement>(null);
-  const contentSize = messages.length + (run.draft?.length ?? 0) + run.pendingTools.size;
+  const liveOutputSize = [...run.toolOutput.values()].reduce((total, text) => total + text.length, 0);
+  const contentSize = messages.length + (run.draft?.length ?? 0) + run.pendingTools.size + liveOutputSize;
   useEffect(() => {
     const el = scroller.current;
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
@@ -77,7 +78,12 @@ export function Chat({ sessionId }: { sessionId: string }) {
                 The agent works in this session&apos;s own folder. Ask it to write a file, then read it back.
               </p>
             ) : (
-              <MessageList messages={messages} draft={run.draft} pendingTools={run.pendingTools} />
+              <MessageList
+                messages={messages}
+                draft={run.draft}
+                pendingTools={run.pendingTools}
+                toolOutput={run.toolOutput}
+              />
             )}
           </div>
         </div>

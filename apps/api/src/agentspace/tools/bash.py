@@ -5,6 +5,7 @@ That is not a sandbox: a command can reach anything the API's user can (ADR-003 
 """
 
 import asyncio
+import contextlib
 import os
 import signal
 import tempfile
@@ -15,7 +16,7 @@ from typing import Annotated, Any
 from asyncer import asyncify
 from pydantic import BaseModel, Field
 
-from agentspace.agent.tool import Tool, ToolContext, ToolResult
+from agentspace.agent.tool import OnUpdate, Tool, ToolContext, ToolResult
 from agentspace.ai.messages import TextContent
 from agentspace.tools.read import MAX_BYTES, MAX_LINES
 
@@ -24,6 +25,9 @@ ENV_ALLOWLIST = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "
 # Bytes read from the end of the output; twice the cap so a partial first line can be dropped.
 TAIL_BYTES = 2 * MAX_BYTES
 CHUNK_BYTES = 64 * 1024
+# Live output for the UI while a command runs: checked this often, at most this much from the end.
+UPDATE_INTERVAL_SECONDS = 0.1
+UPDATE_TAIL_BYTES = 8 * 1024
 
 
 class BashParams(BaseModel):
@@ -54,6 +58,7 @@ class BashTool(Tool[BashParams]):
         log = new_log_file()
         started = time.monotonic()  # TS: performance.now(), in seconds
         exit_code: int | None = None
+        watcher = asyncio.create_task(watch_output(log, ctx.on_update)) if ctx.on_update else None
         try:
             exit_code = await run_command(args.command, ctx.workspace, args.timeout, log)
         except TimeoutError:
@@ -61,6 +66,12 @@ class BashTool(Tool[BashParams]):
         except asyncio.CancelledError:
             log.unlink(missing_ok=True)  # the run is gone; nobody will read this output
             raise
+        finally:
+            # Stop live updates before the final read; the end event carries the full result.
+            if watcher is not None:
+                watcher.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await watcher
 
         # TS: render_output reads a possibly large file (blocking); asyncify runs it on a worker thread.
         text, details = await asyncify(render_output)(log)
@@ -71,6 +82,28 @@ class BashTool(Tool[BashParams]):
         if exit_code != 0:
             return error(text, f"Command exited with code {exit_code}", details)
         return ToolResult.text(text or "(no output)", details)
+
+
+async def watch_output(log: Path, on_update: OnUpdate) -> None:
+    """Until cancelled, send the end of the output every `UPDATE_INTERVAL_SECONDS` if it grew."""
+    sent_size = 0
+    while True:
+        await asyncio.sleep(UPDATE_INTERVAL_SECONDS)
+        size = log.stat().st_size
+        if size != sent_size:
+            sent_size = size
+            await on_update(ToolResult.text(await asyncify(read_tail)(log, UPDATE_TAIL_BYTES)))
+
+
+def read_tail(log: Path, max_bytes: int) -> str:
+    """The last `max_bytes` of the output, starting at a line break when it had to cut."""
+    with log.open("rb") as f:
+        size = f.seek(0, os.SEEK_END)
+        f.seek(max(0, size - max_bytes))
+        text = f.read().decode("utf-8", errors="replace")
+    if size > max_bytes and "\n" in text:
+        text = text.split("\n", 1)[1]  # the cut landed mid-line; drop that partial line
+    return text
 
 
 def error(text: str, status: str, details: dict[str, Any]) -> ToolResult:

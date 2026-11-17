@@ -114,7 +114,7 @@ export interface components {
             /** New Messages */
             new_messages: components["schemas"]["Message"][];
         };
-        AgentEvent: components["schemas"]["AgentStartEvent"] | components["schemas"]["TurnStartEvent"] | components["schemas"]["MessageStartEvent"] | components["schemas"]["MessageUpdateEvent"] | components["schemas"]["MessageEndEvent"] | components["schemas"]["ToolExecutionStartEvent"] | components["schemas"]["ToolExecutionEndEvent"] | components["schemas"]["TurnEndEvent"] | components["schemas"]["AgentEndEvent"];
+        AgentEvent: components["schemas"]["AgentStartEvent"] | components["schemas"]["TurnStartEvent"] | components["schemas"]["MessageStartEvent"] | components["schemas"]["MessageUpdateEvent"] | components["schemas"]["MessageEndEvent"] | components["schemas"]["ToolExecutionStartEvent"] | components["schemas"]["ToolExecutionUpdateEvent"] | components["schemas"]["ToolExecutionEndEvent"] | components["schemas"]["TurnEndEvent"] | components["schemas"]["AgentEndEvent"];
         /**
          * AgentStartEvent
          * @description A run started.
@@ -418,6 +418,39 @@ export interface components {
             arguments: {
                 [key: string]: unknown;
             };
+        };
+        /**
+         * ToolExecutionUpdateEvent
+         * @description Partial output of a running tool call, e.g. bash output so far. Replaces the previous update; never saved.
+         */
+        ToolExecutionUpdateEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "tool_execution_update";
+            /** Tool Call Id */
+            tool_call_id: string;
+            /** Tool Name */
+            tool_name: string;
+            partial: components["schemas"]["ToolResult"];
+        };
+        /**
+         * ToolResult
+         * @description What a tool returns, after pi's `AgentToolResult`: content for the model, details for the UI.
+         */
+        ToolResult: {
+            /** Content */
+            content: components["schemas"]["TextContent"][];
+            /** Details */
+            details?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Is Error
+             * @default false
+             */
+            is_error: boolean;
         };
         /**
          * ToolResultMessage

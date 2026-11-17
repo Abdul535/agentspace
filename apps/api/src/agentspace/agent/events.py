@@ -6,7 +6,8 @@ Sequence for one prompt (modeled on pi's `packages/agent` event flow):
     message_start/end (user)
     turn_start
       message_start (assistant, empty) · message_update* · message_end (assistant)
-      tool_execution_start · tool_execution_end · message_start/end (tool_result)   per tool call
+      tool_execution_start · tool_execution_update* · tool_execution_end            per tool call
+      message_start/end (tool_result)                                              per tool call, in call order
     turn_end
     ...more turns while the assistant calls tools...
     agent_end
@@ -16,6 +17,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from agentspace.agent.tool import ToolResult
 from agentspace.ai.messages import AssistantMessage, Message, ToolResultMessage
 from agentspace.ai.provider import TextDeltaEvent, ToolCallEndEvent
 
@@ -67,6 +69,15 @@ class ToolExecutionStartEvent(BaseModel):
     arguments: dict[str, Any]
 
 
+class ToolExecutionUpdateEvent(BaseModel):
+    """Partial output of a running tool call, e.g. bash output so far. Replaces the previous update; never saved."""
+
+    type: Literal["tool_execution_update"] = "tool_execution_update"
+    tool_call_id: str
+    tool_name: str
+    partial: ToolResult
+
+
 class ToolExecutionEndEvent(BaseModel):
     """A tool call finished, successfully or with an error result."""
 
@@ -100,6 +111,7 @@ type AgentEvent = Annotated[
     | MessageUpdateEvent
     | MessageEndEvent
     | ToolExecutionStartEvent
+    | ToolExecutionUpdateEvent
     | ToolExecutionEndEvent
     | TurnEndEvent
     | AgentEndEvent,

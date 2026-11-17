@@ -1,6 +1,7 @@
 """The tool interface: what a tool looks like to the agent loop and to the model."""
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, ClassVar, Literal, Self
@@ -15,13 +16,21 @@ from agentspace.ai.provider import ToolSpec
 type ExecutionMode = Literal["sequential", "parallel"]
 
 
+# Reports partial output while a tool runs, after pi's `AgentToolUpdateCallback` (ADR-003 step 10).
+# TS: type OnUpdate = (partial: ToolResult) => Promise<void>
+type OnUpdate = Callable[["ToolResult"], Awaitable[None]]
+
+
 # TS: the @dataclass decorator writes the constructor from the fields; frozen=True makes them readonly.
 @dataclass(frozen=True)
 class ToolContext:
-    """Per-session facts every tool call gets, such as the workspace folder."""
+    """What every tool call gets: the session's workspace folder, and a way to report progress."""
 
     workspace: Path
     """The folder the session's tools act in. File tools refuse paths outside it."""
+    on_update: OnUpdate | None = None
+    """Set by the loop for each call. Send a snapshot of the output so far (not a delta); the UI shows the latest.
+    Calls after `execute` returns are ignored. Updates are never sent to the model or saved."""
 
 
 # TS: class ToolError extends Error {}

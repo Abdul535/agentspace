@@ -313,6 +313,9 @@
             "$ref": "#/components/schemas/ToolExecutionStartEvent"
           },
           {
+            "$ref": "#/components/schemas/ToolExecutionUpdateEvent"
+          },
+          {
             "$ref": "#/components/schemas/ToolExecutionEndEvent"
           },
           {
@@ -332,6 +335,7 @@
             "message_update": "#/components/schemas/MessageUpdateEvent",
             "tool_execution_end": "#/components/schemas/ToolExecutionEndEvent",
             "tool_execution_start": "#/components/schemas/ToolExecutionStartEvent",
+            "tool_execution_update": "#/components/schemas/ToolExecutionUpdateEvent",
             "turn_end": "#/components/schemas/TurnEndEvent",
             "turn_start": "#/components/schemas/TurnStartEvent"
           }
@@ -1010,6 +1014,69 @@
         ],
         "title": "ToolExecutionStartEvent",
         "description": "A tool call started running."
+      },
+      "ToolExecutionUpdateEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "tool_execution_update",
+            "title": "Type",
+            "default": "tool_execution_update"
+          },
+          "tool_call_id": {
+            "type": "string",
+            "title": "Tool Call Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "partial": {
+            "$ref": "#/components/schemas/ToolResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "tool_call_id",
+          "tool_name",
+          "partial"
+        ],
+        "title": "ToolExecutionUpdateEvent",
+        "description": "Partial output of a running tool call, e.g. bash output so far. Replaces the previous update; never saved."
+      },
+      "ToolResult": {
+        "properties": {
+          "content": {
+            "items": {
+              "$ref": "#/components/schemas/TextContent"
+            },
+            "type": "array",
+            "title": "Content"
+          },
+          "details": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Details"
+          },
+          "is_error": {
+            "type": "boolean",
+            "title": "Is Error",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "ToolResult",
+        "description": "What a tool returns, after pi's `AgentToolResult`: content for the model, details for the UI."
       },
       "ToolResultMessage": {
         "properties": {

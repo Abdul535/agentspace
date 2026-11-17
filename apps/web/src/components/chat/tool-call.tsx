@@ -33,15 +33,17 @@ export function ToolIcon({ name, className }: { name: string; className?: string
   return <Icon className={className} />;
 }
 
-/** One tool call and, once it has run, its result (collapsed by default). */
+/** One tool call: its live output while it runs, then its result (collapsed by default). */
 export function ToolCallView({
   call,
   result,
   pending,
+  liveOutput,
 }: {
   call: ToolCall;
   result: ToolResultMessage | undefined;
   pending: boolean;
+  liveOutput?: string;
 }) {
   const path = typeof call.arguments.path === "string" ? call.arguments.path : null;
   const output = result?.content.map((block) => block.text).join("") ?? "";
@@ -64,6 +66,12 @@ export function ToolCallView({
           )}
         </span>
       </CollapsibleTrigger>
+      {pending && liveOutput && (
+        // column-reverse keeps the view pinned to the newest line as output grows, with no scroll code.
+        <div className="flex max-h-60 flex-col-reverse overflow-auto border-t">
+          <pre className="px-3 py-2 font-mono text-xs whitespace-pre-wrap text-muted-foreground">{liveOutput}</pre>
+        </div>
+      )}
       <CollapsibleContent>
         <pre
           className={cn(

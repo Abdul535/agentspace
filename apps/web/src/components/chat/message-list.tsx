@@ -16,10 +16,12 @@ export function MessageList({
   messages,
   draft,
   pendingTools,
+  toolOutput,
 }: {
   messages: Message[];
   draft: string | null;
   pendingTools: Set<string>;
+  toolOutput: Map<string, string>;
 }) {
   const results = new Map<string, ToolResultMessage>();
   for (const message of messages) {
@@ -40,7 +42,15 @@ export function MessageList({
           );
         }
         if (message.role === "assistant") {
-          return <AssistantReply key={index} message={message} results={results} pendingTools={pendingTools} />;
+          return (
+            <AssistantReply
+              key={index}
+              message={message}
+              results={results}
+              pendingTools={pendingTools}
+              toolOutput={toolOutput}
+            />
+          );
         }
         return null;
       })}
@@ -57,10 +67,12 @@ function AssistantReply({
   message,
   results,
   pendingTools,
+  toolOutput,
 }: {
   message: AssistantMessage;
   results: Map<string, ToolResultMessage>;
   pendingTools: Set<string>;
+  toolOutput: Map<string, string>;
 }) {
   if (message.stop_reason === "error" || message.stop_reason === "aborted") {
     return (
@@ -85,6 +97,7 @@ function AssistantReply({
             call={block}
             result={results.get(block.id)}
             pending={pendingTools.has(block.id)}
+            liveOutput={toolOutput.get(block.id)}
           />
         ),
       )}

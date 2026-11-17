@@ -11,6 +11,7 @@ from agentspace.agent.events import (
     MessageEndEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
     TurnEndEvent,
 )
 from agentspace.agent.hooks import (
@@ -21,7 +22,7 @@ from agentspace.agent.hooks import (
     LoopConfig,
 )
 from agentspace.agent.loop import run_agent, run_loop
-from agentspace.agent.tool import Tool, ToolContext, ToolResult
+from agentspace.agent.tool import OnUpdate, Tool, ToolContext, ToolResult
 from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
 from agentspace.ai.provider import AssistantEvent, Context
 from agentspace.ai.providers.fake import FakeProvider, Reply, text_reply, tool_reply
@@ -562,3 +563,68 @@ async def test_parallel_edits_to_one_file_keep_both_changes(tmp_path: Path) -> N
 
     assert not any(r.is_error for r in ended(events) if isinstance(r, ToolResultMessage))
     assert (tmp_path / "f.txt").read_text() == "ALPHA\nBETA\n"
+
+
+class ProgressTool(Tool[TimedParams]):
+    """Reports two partial results, then finishes; keeps its callback to try a late update afterwards."""
+
+    name = "progress"
+    description = "Report progress."
+    params = TimedParams
+
+    def __init__(self) -> None:
+        self.kept: list[OnUpdate] = []
+
+    async def execute(self, args: TimedParams, ctx: ToolContext) -> ToolResult:
+        assert ctx.on_update is not None
+        self.kept.append(ctx.on_update)
+        for step in ("1", "2"):
+            await ctx.on_update(ToolResult.text(f"{args.text} {step}"))
+            await asyncio.sleep(args.delay)
+        return ToolResult.text(f"{args.text} done")
+
+
+def tool_events(events: list[AgentEvent]) -> list[tuple[str, str]]:
+    """(event type, call id) for tool start/update/end events, in order."""
+    out: list[tuple[str, str]] = []
+    for e in events:
+        if isinstance(e, ToolExecutionStartEvent | ToolExecutionUpdateEvent):
+            out.append((e.type, e.tool_call_id))
+        elif isinstance(e, ToolExecutionEndEvent):
+            out.append((e.type, e.result.tool_call_id))
+    return out
+
+
+async def test_tool_updates_are_emitted_before_the_calls_end(tmp_path: Path) -> None:
+    progress = ProgressTool()
+    reply = tool_reply(call("progress", "c1", text="a", delay=0.02), call("progress", "c2", text="b", delay=0.01))
+    events = await run(FakeProvider([reply, text_reply("ok")]), tmp_path, tools=[progress])
+
+    updates = [e for e in events if isinstance(e, ToolExecutionUpdateEvent)]
+    assert sorted((u.tool_call_id, u.partial.content[0].text) for u in updates) == [
+        ("c1", "a 1"),
+        ("c1", "a 2"),
+        ("c2", "b 1"),
+        ("c2", "b 2"),
+    ]
+    # Parallel calls interleave, but each call's updates come before its own end.
+    order = tool_events(events)
+    for call_id in ("c1", "c2"):
+        mine = [kind for kind, cid in order if cid == call_id]
+        assert mine == ["tool_execution_start", "tool_execution_update", "tool_execution_update", "tool_execution_end"]
+    # Updates are live only: the saved result is the final one.
+    results = [m for m in ended(events) if isinstance(m, ToolResultMessage)]
+    assert [r.content[0].text for r in results] == ["a done", "b done"]
+
+
+async def test_updates_after_the_call_finished_are_ignored(tmp_path: Path) -> None:
+    progress = ProgressTool()
+    events = await run(
+        FakeProvider([tool_reply(call("progress", text="a")), text_reply("ok")]), tmp_path, tools=[progress]
+    )
+    before = len(events)
+
+    await progress.kept[0](ToolResult.text("too late"))  # no error, and nothing is emitted
+
+    assert len(events) == before
+    assert not any(isinstance(e, ToolExecutionUpdateEvent) and "late" in e.partial.content[0].text for e in events)

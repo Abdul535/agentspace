@@ -131,3 +131,22 @@ def test_switching_model_is_refused_mid_run_and_validated(client: TestClient) ->
 
     client.app.state.active_runs.add(session_id)
     assert client.patch(f"/sessions/{session_id}", json={"model": "a/b"}).status_code == 409
+
+
+def test_running_bash_streams_tool_execution_updates_over_sse(tmp_path: Path, fake: FakeProvider) -> None:
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, enable_bash=True))
+    app.dependency_overrides[provider_lookup] = lambda: lambda name: fake
+    fake.replies = [
+        tool_reply(ToolCall(id="c1", name="bash", arguments={"command": "echo one; sleep 0.25; echo two"})),
+        text_reply("Done."),
+    ]
+    with TestClient(app) as client:
+        session_id = client.post("/sessions", json={}).json()["id"]
+        events = sse_events(client.post(f"/sessions/{session_id}/messages", json={"content": "run it"}).text)
+        saved = client.get(f"/sessions/{session_id}").json()["messages"]
+
+    updates = [e for e in events if e["type"] == "tool_execution_update"]
+    assert updates and updates[0]["tool_call_id"] == "c1"
+    assert updates[0]["partial"]["content"][0]["text"].startswith("one")
+    # Live updates are streamed, never saved: the transcript only has the final result.
+    assert [m["role"] for m in saved] == ["user", "assistant", "tool_result", "assistant"]

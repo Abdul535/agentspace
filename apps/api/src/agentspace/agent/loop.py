@@ -14,6 +14,7 @@ route; closing or cancelling that generator stops the run at its current await.
 import asyncio
 import contextlib
 import copy
+import dataclasses
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
@@ -29,6 +30,7 @@ from agentspace.agent.events import (
     MessageUpdateEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
+    ToolExecutionUpdateEvent,
     TurnEndEvent,
     TurnStartEvent,
 )
@@ -209,7 +211,7 @@ async def run_sequentially(
         if assistant.stop_reason == "length":
             result = error_result(call, TRUNCATED_CALL.format(name=call.name))
         else:
-            result = await execute_tool_call(call, tools, ctx, assistant, config)
+            result = await execute_tool_call(call, tools, ctx, assistant, config, emit)
         await emit(ToolExecutionEndEvent(result=result))
         await emit_result_message(result, emit)
         results.append(result)
@@ -239,7 +241,7 @@ async def run_in_parallel(
 
     async def run_one(p: PreparedCall) -> ToolResultMessage:
         """Execute and finalize one cleared call, reporting its end as soon as it finishes."""
-        result = await finalize_tool_call(p, await execute_prepared(p, ctx), assistant, config)
+        result = await finalize_tool_call(p, await execute_prepared(p, ctx, emit), assistant, config)
         await emit(ToolExecutionEndEvent(result=result))
         return result
 
@@ -276,13 +278,18 @@ class PreparedCall:
 
 
 async def execute_tool_call(
-    call: ToolCall, tools: Sequence[Tool], ctx: ToolContext, assistant: AssistantMessage, config: LoopConfig
+    call: ToolCall,
+    tools: Sequence[Tool],
+    ctx: ToolContext,
+    assistant: AssistantMessage,
+    config: LoopConfig,
+    emit: Emit,
 ) -> ToolResultMessage:
     """Run one tool call through prepare, execute and finalize, like pi's `runToolCall`. Nothing raises."""
     prepared = await prepare_tool_call(call, tools, assistant, config)
     if isinstance(prepared, ToolResultMessage):  # TS: like `if (prepared.kind === "immediate")`
         return prepared
-    result = await execute_prepared(prepared, ctx)
+    result = await execute_prepared(prepared, ctx, emit)
     return await finalize_tool_call(prepared, result, assistant, config)
 
 
@@ -319,14 +326,29 @@ async def prepare_tool_call(
     return PreparedCall(call=call, tool=tool, args=args)
 
 
-async def execute_prepared(prepared: PreparedCall, ctx: ToolContext) -> ToolResult:
-    """Run the tool. A raised error becomes an error result, so the model sees it and can adapt."""
+async def execute_prepared(prepared: PreparedCall, ctx: ToolContext, emit: Emit) -> ToolResult:
+    """Run the tool, passing its progress on as update events. A raised error becomes an error result."""
+    accepting = True
+
+    async def on_update(partial: ToolResult) -> None:
+        """Report partial output; ignored once the call has finished, like pi's update gate."""
+        if accepting:
+            event = ToolExecutionUpdateEvent(
+                tool_call_id=prepared.call.id, tool_name=prepared.call.name, partial=partial
+            )
+            await emit(event)
+
+    # TS: dataclasses.replace is `{ ...ctx, onUpdate }` for a frozen dataclass: a copy with one field changed.
+    call_ctx = dataclasses.replace(ctx, on_update=on_update)
     try:
-        return await prepared.tool.execute(prepared.args, ctx)
+        return await prepared.tool.execute(prepared.args, call_ctx)
     except ToolError as exc:
         return ToolResult(content=[TextContent(text=str(exc))], is_error=True)
     except Exception as exc:  # A tool bug must not end the run.
         return ToolResult(content=[TextContent(text=f"{type(exc).__name__}: {exc}")], is_error=True)
+    finally:
+        # A tool may keep the callback (a timer, a task it forgot to stop); later updates must not follow the end.
+        accepting = False
 
 
 async def finalize_tool_call(
