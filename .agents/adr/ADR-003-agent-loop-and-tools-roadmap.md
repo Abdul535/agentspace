@@ -53,6 +53,10 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
      server's API keys never reach it. pi does not do this.
    - No default timeout, as in pi. A hung command runs until the run is cancelled.
    - Unix only.
+   - Opt-in: sessions get `bash` only with `AGENTSPACE_ENABLE_BASH=true`, until
+     there is a sandbox or per-command approval. An allowlisted environment does
+     not protect secrets on disk: a command can still read `apps/api/.env`. The API
+     also has no auth or Host check yet, so a DNS-rebinding page can drive it.
    *pi:* `tools/bash.ts`, `core/bash-executor.ts`, `tools/truncate.ts`.
 4. [ ] **`grep`, `find`, `ls` tools.** Read-only, respect `.gitignore`, and have
    result limits. *pi:* `tools/grep.ts`, `find.ts`, `ls.ts`.

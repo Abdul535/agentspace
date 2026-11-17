@@ -22,7 +22,7 @@ async def run(
             provider=provider,
             model="m",
             system_prompt="sys",
-            tools=default_tools() if tools is None else tools,
+            tools=default_tools(bash=True) if tools is None else tools,
             history=[],
             prompt=UserMessage(content=prompt),
             ctx=ToolContext(workspace=workspace),

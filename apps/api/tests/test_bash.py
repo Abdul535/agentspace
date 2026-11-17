@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from agentspace.agent.tool import ToolContext, ToolResult
+from agentspace.tools import default_tools
 from agentspace.tools.bash import BashParams, BashTool
 from agentspace.tools.read import MAX_BYTES, MAX_LINES
 
@@ -106,3 +107,8 @@ def assert_dead(pid: int) -> None:
             return
         time.sleep(0.01)
     pytest.fail(f"process {pid} is still running")
+
+
+def test_bash_is_opt_in() -> None:
+    assert "bash" not in [t.name for t in default_tools()]
+    assert "bash" in [t.name for t in default_tools(bash=True)]

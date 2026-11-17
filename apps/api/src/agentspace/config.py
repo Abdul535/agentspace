@@ -22,12 +22,14 @@ class Settings(BaseSettings):
     default_model: str = "anthropic/claude-sonnet-5.5"
     default_system_prompt: str = (
         "You are a helpful assistant working in a workspace folder. "
-        "Use your tools to read, write and edit files and to run shell commands in it. "
+        "Use your tools to inspect and change files in it. "
         "Paths are relative to the workspace."
     )
     max_turns: int = 50
     max_output_tokens: int = 8192
     """Per model reply. Sent as `max_tokens`; raise it for long file writes."""
+    enable_bash: bool = False
+    """Give sessions the `bash` tool. Off by default: commands run unsandboxed as the API's user (ADR-003)."""
     auto_migrate: bool = True
     """Apply pending Alembic migrations when the app starts."""
 

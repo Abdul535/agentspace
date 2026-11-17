@@ -7,6 +7,7 @@ from agentspace.tools.read import ReadTool
 from agentspace.tools.write import WriteTool
 
 
-def default_tools() -> list[Tool]:
-    """The tools a session's agent can call."""
-    return [ReadTool(), BashTool(), EditTool(), WriteTool()]
+def default_tools(*, bash: bool = False) -> list[Tool]:
+    """The tools a session's agent can call; `bash` only when enabled, since it runs unsandboxed."""
+    shell: list[Tool] = [BashTool()] if bash else []
+    return [ReadTool(), *shell, EditTool(), WriteTool()]  # TS: `*shell` spreads the list, like ...shell

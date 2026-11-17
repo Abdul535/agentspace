@@ -68,7 +68,8 @@ Full reasoning and trade-offs are in the ADRs: [`ADR-001`](.agents/adr/ADR-001-m
 
 Set in the environment or `apps/api/.env`: `OPENROUTER_API_KEY`, `AGENTSPACE_DEFAULT_MODEL`
 (default `anthropic/claude-sonnet-5.5`), `AGENTSPACE_DEFAULT_PROVIDER`, `AGENTSPACE_DATA_DIR`,
-`AGENTSPACE_DATABASE_URL`, `AGENTSPACE_MAX_TURNS`, `AGENTSPACE_MAX_OUTPUT_TOKENS`. See
+`AGENTSPACE_DATABASE_URL`, `AGENTSPACE_MAX_TURNS`, `AGENTSPACE_MAX_OUTPUT_TOKENS`, `AGENTSPACE_ENABLE_BASH`
+(default `false`: the `bash` tool runs commands unsandboxed as your user). See
 [`config.py`](apps/api/src/agentspace/config.py).
 
 ## Development

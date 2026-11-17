@@ -108,7 +108,7 @@ async def send_message(
         provider=run.provider,
         model=session.model,
         system_prompt=session.system_prompt,
-        tools=default_tools(),
+        tools=default_tools(bash=settings.enable_bash),
         history=history,
         prompt=UserMessage(content=body.content),
         ctx=ToolContext(workspace=run.workspace),
