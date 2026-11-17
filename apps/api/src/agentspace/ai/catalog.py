@@ -5,7 +5,7 @@ import time
 import httpx
 from pydantic import BaseModel
 
-CACHE_SECONDS = 3600 # 1 hour
+CACHE_SECONDS = 3600  # 1 hour
 FETCH_TIMEOUT = httpx.Timeout(15)
 
 

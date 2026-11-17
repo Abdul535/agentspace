@@ -1,9 +1,17 @@
+import asyncio
 from pathlib import Path
 
 import pytest
 from pydantic import BaseModel
 
 from agentspace.agent.events import AgentEndEvent, AgentEvent, MessageEndEvent
+from agentspace.agent.hooks import (
+    AfterToolCallContext,
+    AfterToolCallResult,
+    BeforeToolCallContext,
+    BeforeToolCallResult,
+    LoopConfig,
+)
 from agentspace.agent.loop import run_agent
 from agentspace.agent.tool import Tool, ToolContext, ToolResult
 from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
@@ -14,7 +22,12 @@ pytestmark = pytest.mark.anyio
 
 
 async def run(
-    provider: FakeProvider, workspace: Path, prompt: str = "go", max_turns: int = 10, tools: list[Tool] | None = None
+    provider: FakeProvider,
+    workspace: Path,
+    prompt: str = "go",
+    max_turns: int = 10,
+    tools: list[Tool] | None = None,
+    config: LoopConfig | None = None,
 ) -> list[AgentEvent]:
     return [
         event
@@ -27,6 +40,7 @@ async def run(
             prompt=UserMessage(content=prompt),
             ctx=ToolContext(workspace=workspace),
             max_turns=max_turns,
+            config=config,
         )
     ]
 
@@ -141,3 +155,143 @@ async def test_returned_error_results_keep_their_details(tmp_path: Path) -> None
 
     result = next(m for m in ended(events) if isinstance(m, ToolResultMessage))
     assert result.is_error and result.content[0].text == "nope" and result.details == {"code": 7}
+
+
+class EchoParams(BaseModel):
+    text: str
+
+
+class EchoTool(Tool[EchoParams]):
+    """Returns its text and records every text it ran with."""
+
+    name = "echo"
+    description = "Echo the text."
+    params = EchoParams
+
+    def __init__(self) -> None:
+        self.ran: list[str] = []
+
+    async def execute(self, args: EchoParams, ctx: ToolContext) -> ToolResult:
+        self.ran.append(args.text)
+        return ToolResult.text(args.text, details={"len": len(args.text)})
+
+
+async def run_echo(tmp_path: Path, config: LoopConfig, *calls: ToolCall) -> tuple[EchoTool, list[ToolResultMessage]]:
+    """Run one reply with `calls` against an EchoTool; return the tool and the tool results."""
+    echo = EchoTool()
+    events = await run(FakeProvider([tool_reply(*calls), text_reply("ok")]), tmp_path, tools=[echo], config=config)
+    return echo, [m for m in ended(events) if isinstance(m, ToolResultMessage)]
+
+
+async def test_before_tool_call_can_block_with_or_without_a_reason(tmp_path: Path) -> None:
+    async def before(ctx: BeforeToolCallContext) -> BeforeToolCallResult | None:
+        if ctx.tool_call.id == "c1":
+            return BeforeToolCallResult(block=True, reason="Not allowed here.")
+        if ctx.tool_call.id == "c2":
+            return BeforeToolCallResult(block=True)
+        return None
+
+    calls = [call("echo", "c1", text="a"), call("echo", "c2", text="b"), call("echo", "c3", text="c")]
+    echo, results = await run_echo(tmp_path, LoopConfig(before_tool_call=before), *calls)
+
+    assert echo.ran == ["c"]
+    assert [(r.is_error, r.content[0].text) for r in results] == [
+        (True, "Not allowed here."),
+        (True, "Tool execution was blocked."),
+        (False, "c"),
+    ]
+
+
+async def test_before_tool_call_gets_validated_args_and_can_change_them(tmp_path: Path) -> None:
+    seen: list[str] = []
+
+    async def before(ctx: BeforeToolCallContext) -> None:
+        assert isinstance(ctx.args, EchoParams)
+        seen.append(ctx.tool_call.id)
+        ctx.args.text = ctx.args.text.upper()
+
+    calls = [call("echo", "c1", text="hi"), call("nope", "c2"), call("echo", "c3", text=5)]
+    echo, results = await run_echo(tmp_path, LoopConfig(before_tool_call=before), *calls)
+
+    # Unknown tools and invalid arguments fail before the hook is asked.
+    assert seen == ["c1"]
+    assert echo.ran == ["HI"]
+    assert [r.is_error for r in results] == [False, True, True]
+
+
+async def test_a_failing_before_tool_call_blocks_the_call(tmp_path: Path) -> None:
+    async def before(ctx: BeforeToolCallContext) -> None:
+        raise RuntimeError("policy store offline")
+
+    echo, results = await run_echo(tmp_path, LoopConfig(before_tool_call=before), call("echo", text="a"))
+
+    assert echo.ran == []
+    assert results[0].is_error and "policy store offline" in results[0].content[0].text
+
+
+async def test_after_tool_call_replaces_only_the_fields_it_sets(tmp_path: Path) -> None:
+    async def after(ctx: AfterToolCallContext) -> AfterToolCallResult | None:
+        match ctx.tool_call.id:  # TS: like a `switch` on the id
+            case "c1":
+                return AfterToolCallResult(content=[TextContent(text="[redacted]")])
+            case "c2":
+                return AfterToolCallResult(is_error=True)
+            case "c3":
+                return AfterToolCallResult(content=[], details={})
+            case _:
+                return None
+
+    calls = [call("echo", f"c{i}", text="secret") for i in range(1, 5)]
+    _, results = await run_echo(tmp_path, LoopConfig(after_tool_call=after), *calls)
+
+    assert [(r.content, r.details, r.is_error) for r in results] == [
+        ([TextContent(text="[redacted]")], {"len": 6}, False),
+        ([TextContent(text="secret")], {"len": 6}, True),
+        ([], {}, False),  # an empty list or dict replaces; only None means "keep"
+        ([TextContent(text="secret")], {"len": 6}, False),
+    ]
+
+
+async def test_a_failing_after_tool_call_replaces_the_result_with_an_error(tmp_path: Path) -> None:
+    async def after(ctx: AfterToolCallContext) -> None:
+        raise ValueError("filter crashed")
+
+    echo, results = await run_echo(tmp_path, LoopConfig(after_tool_call=after), call("echo", text="secret"))
+
+    assert echo.ran == ["secret"]  # the tool did run
+    assert results[0].is_error and "filter crashed" in results[0].content[0].text
+    assert "secret" not in results[0].content[0].text
+
+
+async def test_after_tool_call_is_skipped_for_blocked_calls(tmp_path: Path) -> None:
+    after_calls: list[str] = []
+
+    async def before(ctx: BeforeToolCallContext) -> BeforeToolCallResult:
+        return BeforeToolCallResult(block=True)
+
+    async def after(ctx: AfterToolCallContext) -> None:
+        after_calls.append(ctx.tool_call.id)
+
+    config = LoopConfig(before_tool_call=before, after_tool_call=after)
+    await run_echo(tmp_path, config, call("echo", text="a"))
+
+    assert after_calls == []
+
+
+async def test_cancelling_while_before_tool_call_waits_stops_the_run(tmp_path: Path) -> None:
+    waiting = asyncio.Event()
+    echo = EchoTool()
+
+    async def before(ctx: BeforeToolCallContext) -> None:
+        waiting.set()
+        await asyncio.Event().wait()  # an approval that never comes
+
+    provider = FakeProvider([tool_reply(call("echo", text="a")), text_reply("ok")])
+    # TS: like starting a promise you can cancel later; cancel() raises CancelledError at its current await.
+    task = asyncio.create_task(run(provider, tmp_path, tools=[echo], config=LoopConfig(before_tool_call=before)))
+    await waiting.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert echo.ran == []

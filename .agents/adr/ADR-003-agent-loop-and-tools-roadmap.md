@@ -92,11 +92,19 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
    *pi:* `promptSnippet`/`promptGuidelines` on each tool, `core/system-prompt.ts`.
 
 ### Phase 2 — Loop control
-7. [ ] **`before_tool_call` / `after_tool_call` hooks.** Called after argument
+7. [x] **`before_tool_call` / `after_tool_call` hooks.** Called after argument
    validation. `before` can return `block` + `reason` (shown to the model as an
    error result), and `after` can override fields of the result. This is the base
    for permission rules, such as asking before running `bash`.
    *pi:* `prepareToolCall` and `finalizeExecutedToolCall` in `agent-loop.ts`.
+   Built as follows:
+   - `agent/hooks.py` holds `LoopConfig` and the hook context/result types;
+     `run_agent(config=...)` takes it.
+   - `execute_tool_call` is split into `prepare_tool_call` (lookup, validation,
+     `before`), `execute_prepared` and `finalize_tool_call` (`after`), like pi.
+   - A `before` that raises blocks the call; an `after` that raises replaces the
+     result with an error. Cancellation passes through both (`except Exception`).
+   - Not built: `terminate` on a block (step 11), and any policy using the hooks.
 8. [ ] **`prepare_arguments`.** An optional per-tool fix-up of raw arguments before
    validation, for models that send slightly wrong shapes.
    *pi:* `prepareToolCallArguments`.
