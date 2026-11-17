@@ -8,3 +8,7 @@ data/
 node_modules/
 .next/
 .DS_Store
+
+# draw.io desktop backup and temp files
+*.bkp
+*.dtmp
