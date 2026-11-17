@@ -8,7 +8,7 @@ from agentspace.agent.loop import run_agent
 from agentspace.agent.tool import Tool, ToolContext, ToolResult
 from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
 from agentspace.ai.providers.fake import FakeProvider, Reply, text_reply, tool_reply
-from agentspace.tools import default_tools
+from agentspace.tools import TOOL_SETS, build_tools
 
 pytestmark = pytest.mark.anyio
 
@@ -22,7 +22,7 @@ async def run(
             provider=provider,
             model="m",
             system_prompt="sys",
-            tools=default_tools(bash=True) if tools is None else tools,
+            tools=build_tools(TOOL_SETS["all"], bash=True) if tools is None else tools,
             history=[],
             prompt=UserMessage(content=prompt),
             ctx=ToolContext(workspace=workspace),

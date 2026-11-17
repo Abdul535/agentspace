@@ -69,8 +69,17 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
      context is shown as context. We stop at that match instead.
    - `ls` is plain Python.
    *pi:* `tools/grep.ts`, `find.ts`, `ls.ts`.
-5. [ ] **Tool sets.** Name presets: `coding` = read, bash, edit, write and
+5. [x] **Tool sets.** Name presets: `coding` = read, bash, edit, write and
    `read_only` = read, grep, find, ls. Store the chosen set on the session.
+   Built as follows:
+   - Presets `all` (the default, `AGENTSPACE_DEFAULT_TOOL_SET`), `coding` and
+     `read_only` live in `tools/__init__.py`.
+   - `POST /sessions` takes `tool_set`. The session stores the expanded tool
+     names (`sessions.tools`, JSON), not the preset name, so changing a preset
+     never changes an existing session.
+   - `bash` is still dropped at run time unless `AGENTSPACE_ENABLE_BASH` is on.
+   - Migration `3220c661edc2` gives existing rows all seven tools.
+   - The web UI has no tool-set picker yet.
    *pi:* `tools/index.ts`, `DEFAULT_TOOL_NAMES` in `core/settings-manager.ts`.
 6. [ ] **System prompt from tools.** Each tool adds a short snippet and guidelines
    to the system prompt. *pi:* `promptSnippet`/`promptGuidelines` on each tool,

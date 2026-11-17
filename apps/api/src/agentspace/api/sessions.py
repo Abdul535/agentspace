@@ -13,7 +13,7 @@ from agentspace.agent.tool import ToolContext
 from agentspace.ai.messages import Message, UserMessage
 from agentspace.ai.providers import PROVIDERS
 from agentspace.api.deps import RunDep, SessionRowDep, SettingsDep, StoreDep
-from agentspace.tools import default_tools
+from agentspace.tools import TOOL_SETS, ToolSetName, build_tools
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])  # TS: a sub-router, like `new Hono().basePath("/sessions")`
 
@@ -24,6 +24,8 @@ class SessionCreate(BaseModel):
     provider: str | None = None
     model: str | None = None
     system_prompt: str | None = None
+    tool_set: ToolSetName | None = None
+    """Which preset of tools the session gets; stored as the list of tool names."""
     title: str | None = None
 
 
@@ -35,6 +37,7 @@ class SessionPublic(BaseModel):
     provider: str
     model: str
     system_prompt: str
+    tools: list[str]
     created_at: datetime
     updated_at: datetime
 
@@ -67,6 +70,7 @@ async def create_session(body: SessionCreate, store: StoreDep, settings: Setting
         provider=provider,
         model=body.model or settings.default_model,
         system_prompt=body.system_prompt or settings.default_system_prompt,
+        tools=list(TOOL_SETS[body.tool_set or settings.default_tool_set]),
         title=body.title,
     )
     return SessionPublic.model_validate(session, from_attributes=True)
@@ -108,7 +112,7 @@ async def send_message(
         provider=run.provider,
         model=session.model,
         system_prompt=session.system_prompt,
-        tools=default_tools(bash=settings.enable_bash),
+        tools=build_tools(session.tools, bash=settings.enable_bash),
         history=history,
         prompt=UserMessage(content=body.content),
         ctx=ToolContext(workspace=run.workspace),

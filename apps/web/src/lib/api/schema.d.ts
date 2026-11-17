@@ -200,6 +200,7 @@ export interface components {
             model?: string | null;
             /** System Prompt */
             system_prompt?: string | null;
+            tool_set?: components["schemas"]["ToolSetName"] | null;
             /** Title */
             title?: string | null;
         };
@@ -218,6 +219,8 @@ export interface components {
             model: string;
             /** System Prompt */
             system_prompt: string;
+            /** Tools */
+            tools: string[];
             /**
              * Created At
              * Format: date-time
@@ -246,6 +249,8 @@ export interface components {
             model: string;
             /** System Prompt */
             system_prompt: string;
+            /** Tools */
+            tools: string[];
             /**
              * Created At
              * Format: date-time
@@ -380,6 +385,8 @@ export interface components {
             /** Timestamp */
             timestamp?: number;
         };
+        /** @enum {string} */
+        ToolSetName: "all" | "coding" | "read_only";
         /**
          * TurnEndEvent
          * @description A turn finished: the reply and the results of its tool calls.

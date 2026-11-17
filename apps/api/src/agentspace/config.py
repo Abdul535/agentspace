@@ -6,6 +6,8 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from agentspace.tools import ToolSetName
+
 
 # TS: like parsing process.env with a zod schema (e.g. t3-env): fields are filled from env vars and validated.
 class Settings(BaseSettings):
@@ -28,6 +30,8 @@ class Settings(BaseSettings):
     max_turns: int = 50
     max_output_tokens: int = 8192
     """Per model reply. Sent as `max_tokens`; raise it for long file writes."""
+    default_tool_set: ToolSetName = "all"
+    """Tool preset for sessions created without one: `all`, `coding` or `read_only`."""
     enable_bash: bool = False
     """Give sessions the `bash` tool. Off by default: commands run unsandboxed as the API's user (ADR-003)."""
     auto_migrate: bool = True

@@ -516,6 +516,16 @@
             ],
             "title": "System Prompt"
           },
+          "tool_set": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolSetName"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "title": {
             "anyOf": [
               {
@@ -561,6 +571,13 @@
             "type": "string",
             "title": "System Prompt"
           },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tools"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -586,6 +603,7 @@
           "provider",
           "model",
           "system_prompt",
+          "tools",
           "created_at",
           "updated_at",
           "messages"
@@ -622,6 +640,13 @@
             "type": "string",
             "title": "System Prompt"
           },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tools"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -640,6 +665,7 @@
           "provider",
           "model",
           "system_prompt",
+          "tools",
           "created_at",
           "updated_at"
         ],
@@ -860,6 +886,14 @@
         ],
         "title": "ToolResultMessage",
         "description": "What one tool call returned, sent back to the model as the next message."
+      },
+      "ToolSetName": {
+        "type": "string",
+        "enum": [
+          "all",
+          "coding",
+          "read_only"
+        ]
       },
       "TurnEndEvent": {
         "properties": {

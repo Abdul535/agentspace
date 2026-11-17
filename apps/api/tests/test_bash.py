@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from agentspace.agent.tool import ToolContext, ToolResult
-from agentspace.tools import default_tools
+from agentspace.tools import TOOL_SETS, build_tools
 from agentspace.tools.bash import BashParams, BashTool
 from agentspace.tools.read import MAX_BYTES, MAX_LINES
 
@@ -109,6 +109,6 @@ def assert_dead(pid: int) -> None:
     pytest.fail(f"process {pid} is still running")
 
 
-def test_bash_is_opt_in() -> None:
-    assert "bash" not in [t.name for t in default_tools()]
-    assert "bash" in [t.name for t in default_tools(bash=True)]
+def test_bash_needs_the_server_switch_whatever_the_session_stores() -> None:
+    assert [t.name for t in build_tools(TOOL_SETS["coding"], bash=False)] == ["read", "edit", "write"]
+    assert [t.name for t in build_tools(TOOL_SETS["coding"], bash=True)] == ["read", "bash", "edit", "write"]

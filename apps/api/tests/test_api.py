@@ -19,7 +19,8 @@ def fake() -> FakeProvider:
 
 @pytest.fixture
 def client(tmp_path: Path, fake: FakeProvider) -> Iterator[TestClient]:
-    app = create_app(Settings(data_dir=tmp_path))
+    # _env_file=None: tests must not pick up the developer's apps/api/.env (e.g. AGENTSPACE_ENABLE_BASH).
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path))
     app.dependency_overrides[provider_lookup] = lambda: lambda name: fake
     with TestClient(app) as client:
         yield client
@@ -89,3 +90,19 @@ def test_a_running_session_refuses_a_second_prompt(client: TestClient) -> None:
 def test_empty_prompt_is_rejected(client: TestClient) -> None:
     session_id = client.post("/sessions", json={}).json()["id"]
     assert client.post(f"/sessions/{session_id}/messages", json={"content": ""}).status_code == 422
+
+
+def test_tool_sets_are_stored_as_names_and_limit_what_the_model_gets(client: TestClient, fake: FakeProvider) -> None:
+    default = client.post("/sessions", json={}).json()
+    assert default["tools"] == ["read", "bash", "edit", "write", "grep", "find", "ls"]
+    read_only = client.post("/sessions", json={"tool_set": "read_only"}).json()
+    assert read_only["tools"] == ["read", "grep", "find", "ls"]
+    assert client.post("/sessions", json={"tool_set": "everything"}).status_code == 422
+
+    # The model is offered only the session's tools, and never bash while the server keeps it off.
+    fake.replies = [text_reply("ok")]
+    client.post(f"/sessions/{read_only['id']}/messages", json={"content": "hi"})
+    assert [t.name for t in fake.contexts[-1].tools] == ["read", "grep", "find", "ls"]
+    fake.replies = [text_reply("ok")]
+    client.post(f"/sessions/{default['id']}/messages", json={"content": "hi"})
+    assert "bash" not in [t.name for t in fake.contexts[-1].tools]

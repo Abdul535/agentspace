@@ -18,9 +18,11 @@ class SessionStore:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def create(self, *, provider: str, model: str, system_prompt: str, title: str | None = None) -> SessionRow:
+    async def create(
+        self, *, provider: str, model: str, system_prompt: str, tools: list[str], title: str | None = None
+    ) -> SessionRow:
         """Create and save a new, empty session."""
-        row = SessionRow(provider=provider, model=model, system_prompt=system_prompt, title=title)
+        row = SessionRow(provider=provider, model=model, system_prompt=system_prompt, tools=tools, title=title)
         self.db.add(row)
         await self.db.commit()  # TS: commits the transaction; nothing is written until then
         return row

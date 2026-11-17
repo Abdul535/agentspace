@@ -32,6 +32,8 @@ class SessionRow(SQLModel, table=True):
     provider: str
     model: str
     system_prompt: str
+    tools: list[str] = Field(sa_column=Column(JSON, nullable=False))
+    """Names of the tools the agent may call, in order; `bash` still needs the server to enable it."""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
