@@ -4,7 +4,7 @@ A simplified port of pi's `runLoop` (`packages/agent/src/agent-loop.ts`): a
 reply's tool calls run in parallel or one at a time (`LoopConfig.tool_execution`),
 each through prepare, execute and finalize with the `LoopConfig` hooks, and there
 are no steering/follow-up queues yet. The run ends after a batch in which every
-call set `terminate`.
+call set `terminate`, or when `finish_turn` says so; `max_turns` caps it either way.
 The loop holds no storage; callers persist messages from `message_end` events.
 
 `run_loop` reports events through an `emit` callback, so any code holding it can
@@ -35,7 +35,13 @@ from agentspace.agent.events import (
     TurnEndEvent,
     TurnStartEvent,
 )
-from agentspace.agent.hooks import AfterToolCallContext, BeforeToolCallContext, LoopConfig
+from agentspace.agent.hooks import (
+    AfterToolCallContext,
+    BeforeToolCallContext,
+    FinishTurnContext,
+    LoopConfig,
+    TurnDecision,
+)
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
 from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
 from agentspace.ai.provider import Context, DoneEvent, ErrorEvent, Provider, TextDeltaEvent, ToolCallEndEvent
@@ -127,6 +133,15 @@ async def run_loop(
         messages.append(message)
         new_messages.append(message)
 
+    async def finish_turn(
+        turn: int, assistant: AssistantMessage, results: list[ToolResultMessage]
+    ) -> TurnDecision | None:
+        """Ask the `finish_turn` hook, if any, what to do after this turn."""
+        if config.finish_turn is None:
+            return None
+        # A copy, so the hook can't change what this run returns.
+        return await config.finish_turn(FinishTurnContext(turn, assistant, results, list(new_messages)))
+
     await emit(AgentStartEvent())
     await emit(MessageStartEvent(message=prompt))
     add(prompt)
@@ -159,6 +174,8 @@ async def run_loop(
         await emit(MessageEndEvent(message=assistant))
 
         if assistant.stop_reason in ("error", "aborted"):
+            # The hook still sees the turn, but can't keep a failed run going (pi does the same).
+            await finish_turn(turn, assistant, [])
             await emit(TurnEndEvent(turn=turn, message=assistant, tool_results=[]))
             reason = "error" if assistant.stop_reason == "error" else "aborted"
             break
@@ -168,8 +185,15 @@ async def run_loop(
         results = [f.message for f in finished]
         for result in results:
             add(result)
+        decision = await finish_turn(turn, assistant, results)
         await emit(TurnEndEvent(turn=turn, message=assistant, tool_results=results))
 
+        if decision == "end":
+            reason = "finish_turn"
+            break
+        # One more turn on the same context, even after a final answer or a terminating batch.
+        if decision == "continue":
+            continue
         # A reply without tool calls is the final answer.
         if not calls:
             reason = "done"

@@ -22,8 +22,8 @@ from agentspace.ai.messages import AssistantMessage, Message, ToolResultMessage
 from agentspace.ai.provider import TextDeltaEvent, ToolCallEndEvent
 
 # Why a run stopped: the model answered, it hit max_turns, the provider failed, it was cancelled,
-# or every tool call in the last batch asked to stop (`ToolResult.terminate`).
-type EndReason = Literal["done", "max_turns", "error", "aborted", "terminated"]
+# every tool call in the last batch asked to stop (`ToolResult.terminate`), or `finish_turn` returned "end".
+type EndReason = Literal["done", "max_turns", "error", "aborted", "terminated", "finish_turn"]
 
 
 # TS: each event is a Pydantic model (zod schema + type); `type: Literal["x"]` is the tag, like `type: "x"`.

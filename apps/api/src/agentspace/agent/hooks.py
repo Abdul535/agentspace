@@ -1,17 +1,18 @@
 """Extension points and settings of the agent loop, after pi's `AgentLoopConfig` (`packages/agent/src/types.ts`).
 
 ADR-003 step 7: `before_tool_call` can block a call, `after_tool_call` can rewrite
-its result. Both are optional and async; leaving one out means "no change".
+its result. Step 12: `finish_turn` can end the run or ask for one more turn.
+All are optional and async; leaving one out means "no change".
 """
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
 from agentspace.agent.tool import ExecutionMode
-from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall
+from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage
 
 
 @dataclass(frozen=True)
@@ -58,9 +59,28 @@ class AfterToolCallResult:
     terminate: bool | None = None
 
 
+@dataclass(frozen=True)
+class FinishTurnContext:
+    """What `finish_turn` sees: the turn that just ended, after its tool results were added."""
+
+    turn: int
+    """1 for the first turn of the run; `max_turns` still caps it."""
+    message: AssistantMessage
+    """The model's reply this turn."""
+    tool_results: list[ToolResultMessage]
+    new_messages: list[Message]
+    """Everything this run has added so far, starting with the prompt."""
+
+
+# "end" stops the run now; "continue" asks for at least one more turn, even after a final answer or a
+# terminating batch. None keeps the normal rule (go on while the model calls tools). After pi's `AgentTurnDecision`.
+type TurnDecision = Literal["end", "continue"]
+
+
 # TS: type BeforeToolCall = (ctx: BeforeToolCallContext) => Promise<BeforeToolCallResult | undefined>
 type BeforeToolCall = Callable[[BeforeToolCallContext], Awaitable[BeforeToolCallResult | None]]
 type AfterToolCall = Callable[[AfterToolCallContext], Awaitable[AfterToolCallResult | None]]
+type FinishTurn = Callable[[FinishTurnContext], Awaitable[TurnDecision | None]]
 
 
 @dataclass(frozen=True)
@@ -74,3 +94,6 @@ class LoopConfig:
     """Runs after validation, before execution. Raising blocks the call too (fail closed)."""
     after_tool_call: AfterToolCall | None = None
     """Runs after execution, unless the call was blocked. Raising replaces the real result with an error."""
+    finish_turn: FinishTurn | None = None
+    """Runs after each turn, before `turn_end`. Ignored after a provider error or abort, which always end the run.
+    Raising ends the run with that error, like any other loop failure."""

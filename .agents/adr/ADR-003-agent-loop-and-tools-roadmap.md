@@ -148,8 +148,19 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
       so it is never sent to the model or saved.
     - Error results (unknown tool, bad arguments, failed hooks, truncated calls)
       never terminate. The run ends with `reason="terminated"`.
-12. [ ] **`finish_turn` hook.** Can return `end` or `continue` after each turn.
+12. [x] **`finish_turn` hook.** Can return `end` or `continue` after each turn.
     It replaces the hard `max_turns` cut with a policy. *pi:* `FinishTurn`.
+    Built as follows:
+    - `LoopConfig.finish_turn` gets a `FinishTurnContext` (turn number, reply,
+      tool results, the run's messages so far) after the tool results are added
+      and before `turn_end`.
+    - It returns `"end"`, `"continue"` or `None`. `"end"` stops the run with
+      `reason="finish_turn"`. `"continue"` runs one more turn on the same context,
+      even after a final answer or a terminating batch. `None` keeps the normal rule.
+    - After a provider error or abort the hook still runs, but its answer is
+      ignored, as in pi.
+    - `max_turns` stays as an outer safety cap that the hook can't lift, so a hook
+      that always continues can't loop forever. pi has no such cap.
 
 ### Phase 3 — Runs that outlive the request
 13. [ ] **Background runs.** A run is an `asyncio` task owned by the server, not

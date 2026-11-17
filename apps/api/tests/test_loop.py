@@ -19,7 +19,9 @@ from agentspace.agent.hooks import (
     AfterToolCallResult,
     BeforeToolCallContext,
     BeforeToolCallResult,
+    FinishTurnContext,
     LoopConfig,
+    TurnDecision,
 )
 from agentspace.agent.loop import run_agent, run_loop
 from agentspace.agent.tool import OnUpdate, Tool, ToolContext, ToolResult
@@ -689,3 +691,60 @@ async def test_a_failing_tool_never_terminates_the_run(tmp_path: Path) -> None:
     events = await run(provider, tmp_path, tools=[StopTool()])
 
     assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"
+
+
+async def test_finish_turn_sees_each_turn_and_can_end_the_run(tmp_path: Path) -> None:
+    seen: list[FinishTurnContext] = []
+
+    async def end_after_two(ctx: FinishTurnContext) -> TurnDecision | None:
+        seen.append(ctx)
+        return "end" if ctx.turn == 2 else None
+
+    replies: list[Reply] = [tool_reply(call("echo", "c1", text="a")) for _ in range(5)]
+    provider = FakeProvider(replies)
+    events = await run(provider, tmp_path, tools=[EchoTool()], config=LoopConfig(finish_turn=end_after_two))
+
+    assert len(provider.contexts) == 2
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "finish_turn"
+    # The hook sees the turn after its tool results were added, and before turn_end.
+    first = seen[0]
+    assert first.turn == 1 and [r.content[0].text for r in first.tool_results] == ["a"]
+    assert [m.role for m in first.new_messages] == ["user", "assistant", "tool_result"]
+    assert isinstance(events[-2], TurnEndEvent) and events[-2].turn == 2
+
+
+async def test_finish_turn_continue_asks_again_after_a_final_answer_or_terminate(tmp_path: Path) -> None:
+    async def continue_once(ctx: FinishTurnContext) -> TurnDecision | None:
+        return "continue" if ctx.turn == 1 else None
+
+    for first in (text_reply("done?"), tool_reply(call("stop", text="a"))):
+        provider = FakeProvider([first, text_reply("really done")])
+        events = await run(provider, tmp_path, tools=[StopTool()], config=LoopConfig(finish_turn=continue_once))
+
+        assert len(provider.contexts) == 2
+        assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"
+
+
+async def test_max_turns_still_caps_a_finish_turn_that_always_continues(tmp_path: Path) -> None:
+    async def always(ctx: FinishTurnContext) -> TurnDecision:
+        return "continue"
+
+    provider = FakeProvider([text_reply("hi") for _ in range(5)])
+    events = await run(provider, tmp_path, max_turns=3, tools=[], config=LoopConfig(finish_turn=always))
+
+    assert len(provider.contexts) == 3
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "max_turns"
+
+
+async def test_finish_turn_cannot_keep_a_failed_run_going(tmp_path: Path) -> None:
+    turns: list[int] = []
+
+    async def always(ctx: FinishTurnContext) -> TurnDecision:
+        turns.append(ctx.turn)
+        return "continue"
+
+    provider = FakeProvider([AssistantMessage(provider="fake", model="m", stop_reason="error"), text_reply("x")])
+    events = await run(provider, tmp_path, tools=[], config=LoopConfig(finish_turn=always))
+
+    assert turns == [1]
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "error"

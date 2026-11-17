@@ -161,7 +161,7 @@ export interface components {
             timestamp?: number;
         };
         /** @enum {string} */
-        EndReason: "done" | "max_turns" | "error" | "aborted" | "terminated";
+        EndReason: "done" | "max_turns" | "error" | "aborted" | "terminated" | "finish_turn";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */

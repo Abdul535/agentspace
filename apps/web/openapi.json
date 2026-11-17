@@ -435,7 +435,8 @@
           "max_turns",
           "error",
           "aborted",
-          "terminated"
+          "terminated",
+          "finish_turn"
         ]
       },
       "HTTPValidationError": {
