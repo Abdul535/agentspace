@@ -27,7 +27,7 @@ echo 'OPENROUTER_API_KEY=sk-or-...' > .env
 uv run fastapi dev          # http://127.0.0.1:8000, docs at /docs
 ```
 
-Then the web app, from the repo root:
+Or `pnpm dev:api` from the repo root, once `.env` exists. Then the web app, from the repo root:
 
 ```bash
 pnpm install

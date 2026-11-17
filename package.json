@@ -2,6 +2,7 @@
   "name": "agentspace",
   "private": true,
   "scripts": {
+    "dev:api": "cd apps/api && uv run fastapi dev",
     "dev:web": "pnpm --filter web dev",
     "build:web": "pnpm --filter web build",
     "lint:web": "pnpm --filter web lint",
