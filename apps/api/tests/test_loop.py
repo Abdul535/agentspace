@@ -5,7 +5,14 @@ from pathlib import Path
 import pytest
 from pydantic import BaseModel
 
-from agentspace.agent.events import AgentEndEvent, AgentEvent, MessageEndEvent, ToolExecutionStartEvent
+from agentspace.agent.events import (
+    AgentEndEvent,
+    AgentEvent,
+    MessageEndEvent,
+    ToolExecutionEndEvent,
+    ToolExecutionStartEvent,
+    TurnEndEvent,
+)
 from agentspace.agent.hooks import (
     AfterToolCallContext,
     AfterToolCallResult,
@@ -409,3 +416,149 @@ async def test_closing_the_reader_early_cancels_the_running_tool(tmp_path: Path)
     await events.aclose()  # TS: like calling `return()` on an async iterator
 
     assert slow.cancelled
+
+
+class TimedParams(BaseModel):
+    text: str
+    delay: float = 0
+
+
+class TimedTool(Tool[TimedParams]):
+    """Sleeps for `delay`, tracking how many calls run at once and in what order they finish."""
+
+    name = "timed"
+    description = "Wait, then echo."
+    params = TimedParams
+
+    def __init__(self) -> None:
+        self.active = 0
+        self.most_at_once = 0
+        self.finished: list[str] = []
+
+    async def execute(self, args: TimedParams, ctx: ToolContext) -> ToolResult:
+        self.active += 1
+        self.most_at_once = max(self.most_at_once, self.active)
+        await asyncio.sleep(args.delay)
+        self.active -= 1
+        self.finished.append(args.text)
+        return ToolResult.text(args.text)
+
+
+class SequentialTimedTool(TimedTool):
+    name = "timed_seq"
+    execution_mode = "sequential"
+
+
+def tool_ids(events: list[AgentEvent], kind: type) -> list[str]:
+    """Tool call ids of the given event type, or of ended tool-result messages for MessageEndEvent."""
+    if kind is MessageEndEvent:
+        return [m.tool_call_id for m in ended(events) if isinstance(m, ToolResultMessage)]
+    if kind is ToolExecutionEndEvent:
+        return [e.result.tool_call_id for e in events if isinstance(e, ToolExecutionEndEvent)]
+    return [e.tool_call_id for e in events if isinstance(e, ToolExecutionStartEvent)]
+
+
+async def test_parallel_calls_overlap_and_results_keep_the_models_order(tmp_path: Path) -> None:
+    timed = TimedTool()
+    reply = tool_reply(call("timed", "c1", text="slow", delay=0.05), call("timed", "c2", text="fast"))
+    events = await run(FakeProvider([reply, text_reply("ok")]), tmp_path, tools=[timed])
+
+    assert timed.most_at_once == 2
+    assert tool_ids(events, ToolExecutionStartEvent) == ["c1", "c2"]
+    assert tool_ids(events, ToolExecutionEndEvent) == ["c2", "c1"]  # in the order they finished
+    assert tool_ids(events, MessageEndEvent) == ["c1", "c2"]  # in the order the model made them
+    turn_end = next(e for e in events if isinstance(e, TurnEndEvent) and e.tool_results)
+    assert [r.tool_call_id for r in turn_end.tool_results] == ["c1", "c2"]
+
+
+async def test_sequential_config_or_tool_runs_the_batch_one_at_a_time(tmp_path: Path) -> None:
+    timed, timed_seq = TimedTool(), SequentialTimedTool()
+    calls = [call("timed", "c1", text="a", delay=0.01), call("timed", "c2", text="b", delay=0.01)]
+    await run(
+        FakeProvider([tool_reply(*calls), text_reply("ok")]),
+        tmp_path,
+        tools=[timed],
+        config=LoopConfig(tool_execution="sequential"),
+    )
+    assert timed.most_at_once == 1
+
+    # One sequential tool in the batch makes the other tool's calls wait their turn too.
+    timed = TimedTool()
+    mixed = [*calls, call("timed_seq", "c3", text="c")]
+    await run(FakeProvider([tool_reply(*mixed), text_reply("ok")]), tmp_path, tools=[timed, timed_seq])
+    assert timed.most_at_once == 1 and timed.finished == ["a", "b"]
+
+
+async def test_parallel_batch_prepares_every_call_before_any_runs(tmp_path: Path) -> None:
+    log: list[str] = []
+
+    class LoggingTool(TimedTool):
+        async def execute(self, args: TimedParams, ctx: ToolContext) -> ToolResult:
+            log.append(f"run {args.text}")
+            return await super().execute(args, ctx)
+
+    async def before(ctx: BeforeToolCallContext) -> BeforeToolCallResult | None:
+        log.append(f"before {ctx.tool_call.id}")
+        return BeforeToolCallResult(block=True, reason="no") if ctx.tool_call.id == "c2" else None
+
+    calls = [call("timed", "c1", text="a"), call("timed", "c2", text="b"), call("timed", "c3", text="c")]
+    events = await run(
+        FakeProvider([tool_reply(*calls), text_reply("ok")]),
+        tmp_path,
+        tools=[LoggingTool()],
+        config=LoopConfig(before_tool_call=before),
+    )
+
+    assert log[:3] == ["before c1", "before c2", "before c3"]
+    assert sorted(log[3:]) == ["run a", "run c"]
+    # The refused call ends during preparation, before the next call starts.
+    order = [
+        (type(e).__name__, getattr(e, "tool_call_id", None) or e.result.tool_call_id)
+        for e in events
+        if isinstance(e, ToolExecutionStartEvent | ToolExecutionEndEvent)
+    ]
+    assert order[:4] == [
+        ("ToolExecutionStartEvent", "c1"),
+        ("ToolExecutionStartEvent", "c2"),
+        ("ToolExecutionEndEvent", "c2"),
+        ("ToolExecutionStartEvent", "c3"),
+    ]
+
+
+async def test_cancelling_a_parallel_batch_cancels_every_running_tool(tmp_path: Path) -> None:
+    class CountingSlowTool(SlowTool):
+        def __init__(self) -> None:
+            super().__init__()
+            self.running = 0
+            self.cancels = 0
+
+        async def execute(self, args: EchoParams, ctx: ToolContext) -> ToolResult:
+            self.running += 1
+            try:
+                return await super().execute(args, ctx)
+            except asyncio.CancelledError:
+                self.cancels += 1
+                raise
+
+    slow = CountingSlowTool()
+    reply = tool_reply(call("slow", "c1", text="a"), call("slow", "c2", text="b"))
+    task = asyncio.create_task(run(FakeProvider([reply, text_reply("ok")]), tmp_path, tools=[slow]))
+    while slow.running < 2:
+        await asyncio.sleep(0)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert slow.cancels == 2
+
+
+async def test_parallel_edits_to_one_file_keep_both_changes(tmp_path: Path) -> None:
+    (tmp_path / "f.txt").write_text("alpha\nbeta\n")
+    reply = tool_reply(
+        call("edit", "c1", path="f.txt", edits=[{"old_text": "alpha", "new_text": "ALPHA"}]),
+        call("edit", "c2", path="f.txt", edits=[{"old_text": "beta", "new_text": "BETA"}]),
+    )
+    events = await run(FakeProvider([reply, text_reply("ok")]), tmp_path)
+
+    assert not any(r.is_error for r in ended(events) if isinstance(r, ToolResultMessage))
+    assert (tmp_path / "f.txt").read_text() == "ALPHA\nBETA\n"

@@ -3,12 +3,16 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Literal, Self
 
 from pydantic import BaseModel
 
 from agentspace.ai.messages import TextContent
 from agentspace.ai.provider import ToolSpec
+
+# How the calls in one reply run: one after another, or concurrently (after pi's `ToolExecutionMode`).
+# TS: type ExecutionMode = "sequential" | "parallel"
+type ExecutionMode = Literal["sequential", "parallel"]
 
 
 # TS: the @dataclass decorator writes the constructor from the fields; frozen=True makes them readonly.
@@ -57,6 +61,8 @@ class Tool[P: BaseModel](ABC):
     guidelines: ClassVar[tuple[str, ...]] = ()
     """Rules this tool adds to the system prompt, after pi's `promptGuidelines`."""
     params: type[P]  # TS: the schema class itself (like `typeof Schema`), not an instance
+    execution_mode: ClassVar[ExecutionMode] = "parallel"
+    """"sequential" makes every call in a batch that includes this tool run one at a time."""
 
     # TS: abstract execute(args: P, ctx: ToolContext): Promise<ToolResult>
     @abstractmethod

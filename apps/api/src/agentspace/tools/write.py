@@ -7,6 +7,7 @@ from asyncer import asyncify
 from pydantic import BaseModel, Field
 
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
+from agentspace.tools.file_lock import file_lock
 from agentspace.tools.paths import resolve_in_workspace
 
 
@@ -34,7 +35,8 @@ class WriteTool(Tool[WriteParams]):
         """Write the file off the event loop and report how many bytes were written."""
         path = resolve_in_workspace(ctx.workspace, args.path)
         # TS: write_text blocks (like fs.writeFileSync); asyncify runs it on a worker thread and awaits it.
-        size = await asyncify(write_text)(path, args.path, args.content)
+        async with file_lock(path):
+            size = await asyncify(write_text)(path, args.path, args.content)
         return ToolResult.text(f"Wrote {size} bytes to {args.path}", {"path": args.path, "bytes": size})
 
 

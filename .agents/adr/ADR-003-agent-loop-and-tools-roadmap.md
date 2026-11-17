@@ -114,11 +114,20 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
      a raise becomes an error result.
    - `edit` repairs `edits` sent as a JSON string or a single object, the old
      top-level `old_text`/`new_text` shape, and camelCase `oldText`/`newText`.
-9. [ ] **Parallel tool execution.** Prepare calls in order, run them with
+9. [x] **Parallel tool execution.** Prepare calls in order, run them with
    `asyncio.gather` / `TaskGroup`, and emit results in the model's call order. A
    per-tool `execution_mode = "sequential"` forces the whole batch to run in order.
    Writes to the same file are serialized.
    *pi:* `executeToolCallsParallel`, `tools/file-mutation-queue.ts`.
+   Built as follows (on ADR-006's `emit`):
+   - `LoopConfig.tool_execution` defaults to `"parallel"`, as in pi; a tool with
+     `execution_mode = "sequential"` makes its whole batch sequential, and a
+     reply cut off by the token limit always runs the sequential path.
+   - `run_in_parallel` prepares calls in order (refusals end right away), runs the
+     cleared ones in an `asyncio.TaskGroup`, emits each `tool_execution_end` as it
+     finishes, then the result messages in call order.
+   - `tools/file_lock.py`: one `asyncio.Lock` per resolved path, held by `write`
+     and by `edit`'s whole read-modify-write.
 10. [ ] **Tool progress events.** Add an `on_update` callback to `execute` and a
     `tool_execution_update` event, for example to stream bash output live.
     *pi:* `emitToolExecutionUpdate`.

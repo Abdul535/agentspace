@@ -1,4 +1,4 @@
-"""Extension points of the agent loop, after pi's `AgentLoopConfig` (`packages/agent/src/types.ts`).
+"""Extension points and settings of the agent loop, after pi's `AgentLoopConfig` (`packages/agent/src/types.ts`).
 
 ADR-003 step 7: `before_tool_call` can block a call, `after_tool_call` can rewrite
 its result. Both are optional and async; leaving one out means "no change".
@@ -10,6 +10,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from agentspace.agent.tool import ExecutionMode
 from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall
 
 
@@ -61,7 +62,10 @@ type AfterToolCall = Callable[[AfterToolCallContext], Awaitable[AfterToolCallRes
 
 @dataclass(frozen=True)
 class LoopConfig:
-    """Optional hooks for one run, kept on one object so `run_agent` doesn't grow a parameter per hook."""
+    """Optional hooks and settings for one run, kept on one object so `run_agent` doesn't grow a parameter each."""
+
+    tool_execution: ExecutionMode = "parallel"
+    """How a reply's tool calls run (ADR-003 step 9). A tool with `execution_mode="sequential"` overrides it."""
 
     before_tool_call: BeforeToolCall | None = None
     """Runs after validation, before execution. Raising blocks the call too (fail closed)."""

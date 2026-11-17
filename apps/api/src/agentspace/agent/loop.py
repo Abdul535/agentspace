@@ -1,8 +1,9 @@
 """The agent loop: ask the model, run the tools it calls, repeat until it answers without tools.
 
-A simplified port of pi's `runLoop` (`packages/agent/src/agent-loop.ts`): tools
-run one at a time, each through prepare, execute and finalize with the
-`LoopConfig` hooks, and there are no steering/follow-up queues yet.
+A simplified port of pi's `runLoop` (`packages/agent/src/agent-loop.ts`): a
+reply's tool calls run in parallel or one at a time (`LoopConfig.tool_execution`),
+each through prepare, execute and finalize with the `LoopConfig` hooks, and there
+are no steering/follow-up queues yet.
 The loop holds no storage; callers persist messages from `message_end` events.
 
 `run_loop` reports events through an `emit` callback, so any code holding it can
@@ -159,20 +160,10 @@ async def run_loop(
             reason = "error" if assistant.stop_reason == "error" else "aborted"
             break
 
-        # Run the reply's tool calls one at a time, in the order the model made them.
         calls = assistant.tool_calls()
-        results: list[ToolResultMessage] = []
-        for call in calls:
-            await emit(ToolExecutionStartEvent(tool_call_id=call.id, tool_name=call.name, arguments=call.arguments))
-            if assistant.stop_reason == "length":
-                result = error_result(call, TRUNCATED_CALL.format(name=call.name))
-            else:
-                result = await execute_tool_call(call, tools, ctx, assistant, config)
-            await emit(ToolExecutionEndEvent(result=result))
-            await emit(MessageStartEvent(message=result))
+        results = await execute_tool_calls(calls, tools, ctx, assistant, config, emit)
+        for result in results:
             add(result)
-            results.append(result)
-            await emit(MessageEndEvent(message=result))
         await emit(TurnEndEvent(turn=turn, message=assistant, tool_results=results))
 
         # A reply without tool calls is the final answer.
@@ -181,6 +172,98 @@ async def run_loop(
             break
 
     await emit(AgentEndEvent(reason=reason, new_messages=new_messages))
+
+
+async def execute_tool_calls(
+    calls: Sequence[ToolCall],
+    tools: Sequence[Tool],
+    ctx: ToolContext,
+    assistant: AssistantMessage,
+    config: LoopConfig,
+    emit: Emit,
+) -> list[ToolResultMessage]:
+    """Run a reply's tool calls and return their results in the order the model made the calls."""
+    names = {call.name for call in calls}
+    # One tool that can't run alongside others makes the whole batch sequential, as in pi.
+    sequential = config.tool_execution == "sequential" or any(
+        tool.execution_mode == "sequential" for tool in tools if tool.name in names
+    )
+    # A reply cut off by the token limit may carry truncated arguments, so none of its calls run.
+    if assistant.stop_reason == "length" or sequential:
+        return await run_sequentially(calls, tools, ctx, assistant, config, emit)
+    return await run_in_parallel(calls, tools, ctx, assistant, config, emit)
+
+
+async def run_sequentially(
+    calls: Sequence[ToolCall],
+    tools: Sequence[Tool],
+    ctx: ToolContext,
+    assistant: AssistantMessage,
+    config: LoopConfig,
+    emit: Emit,
+) -> list[ToolResultMessage]:
+    """Each call starts, runs and reports its result before the next one starts."""
+    results: list[ToolResultMessage] = []
+    for call in calls:
+        await emit(ToolExecutionStartEvent(tool_call_id=call.id, tool_name=call.name, arguments=call.arguments))
+        if assistant.stop_reason == "length":
+            result = error_result(call, TRUNCATED_CALL.format(name=call.name))
+        else:
+            result = await execute_tool_call(call, tools, ctx, assistant, config)
+        await emit(ToolExecutionEndEvent(result=result))
+        await emit_result_message(result, emit)
+        results.append(result)
+    return results
+
+
+async def run_in_parallel(
+    calls: Sequence[ToolCall],
+    tools: Sequence[Tool],
+    ctx: ToolContext,
+    assistant: AssistantMessage,
+    config: LoopConfig,
+    emit: Emit,
+) -> list[ToolResultMessage]:
+    """Prepare the calls in order, run the cleared ones at the same time, then report results in call order.
+
+    Preparing in order keeps `before_tool_call` approvals one at a time, and no tool starts
+    until every call has been cleared or refused, as in pi's `executeToolCallsParallel`.
+    """
+    prepared: list[PreparedCall | ToolResultMessage] = []
+    for call in calls:
+        await emit(ToolExecutionStartEvent(tool_call_id=call.id, tool_name=call.name, arguments=call.arguments))
+        outcome = await prepare_tool_call(call, tools, assistant, config)
+        if isinstance(outcome, ToolResultMessage):  # refused: it ends now, before later calls start
+            await emit(ToolExecutionEndEvent(result=outcome))
+        prepared.append(outcome)
+
+    async def run_one(p: PreparedCall) -> ToolResultMessage:
+        """Execute and finalize one cleared call, reporting its end as soon as it finishes."""
+        result = await finalize_tool_call(p, await execute_prepared(p, ctx), assistant, config)
+        await emit(ToolExecutionEndEvent(result=result))
+        return result
+
+    # TS: like `Promise.all`, but if the run is cancelled every running tool is cancelled too.
+    # The calls never raise (failures are results), so one tool can't take its siblings down.
+    tasks: dict[int, asyncio.Task[ToolResultMessage]] = {}
+    async with asyncio.TaskGroup() as group:
+        for index, outcome in enumerate(prepared):
+            if isinstance(outcome, PreparedCall):
+                tasks[index] = group.create_task(run_one(outcome))
+
+    # Results go back in the model's call order, whatever order the tools finished in.
+    results = [
+        outcome if isinstance(outcome, ToolResultMessage) else tasks[i].result() for i, outcome in enumerate(prepared)
+    ]
+    for result in results:
+        await emit_result_message(result, emit)
+    return results
+
+
+async def emit_result_message(result: ToolResultMessage, emit: Emit) -> None:
+    """Report a tool result as a message: the `message_end` is what callers save."""
+    await emit(MessageStartEvent(message=result))
+    await emit(MessageEndEvent(message=result))
 
 
 @dataclass(frozen=True)

@@ -13,6 +13,7 @@ from asyncer import asyncify
 from pydantic import BaseModel, Field
 
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
+from agentspace.tools.file_lock import file_lock
 from agentspace.tools.paths import resolve_in_workspace
 
 BOM = "﻿"
@@ -98,7 +99,9 @@ class EditTool(Tool[EditParams]):
         """Apply the edits off the event loop; `details` carries a unified diff of the change."""
         path = resolve_in_workspace(ctx.workspace, args.path)
         # TS: edit_file blocks (fs.readFileSync/writeFileSync); asyncify runs it on a worker thread and awaits it.
-        return await asyncify(edit_file)(path, args.path, args.edits)
+        # The whole read-modify-write holds the file's lock, so a parallel edit can't overwrite it in between.
+        async with file_lock(path):
+            return await asyncify(edit_file)(path, args.path, args.edits)
 
 
 def snake_case_edit(edit: dict[str, Any]) -> dict[str, Any]:

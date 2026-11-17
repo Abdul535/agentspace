@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ from pydantic import ValidationError
 
 from agentspace.agent.tool import ToolContext, ToolError, ToolResult
 from agentspace.tools.edit import EditParams, EditTool, Replacement
+from agentspace.tools.file_lock import _entries, file_lock
 from agentspace.tools.read import MAX_BYTES, MAX_LINES, ReadParams, ReadTool
 from agentspace.tools.write import WriteParams, WriteTool
 
@@ -182,3 +184,29 @@ def test_edit_leaves_unfixable_arguments_for_validation() -> None:
         prepared_edits({"path": "f", "edits": [{"old_text": "a"}]})
     valid = {"path": "f", "edits": [{"old_text": "a", "new_text": "b"}]}
     assert EditTool().prepare_arguments(dict(valid)) == valid
+
+
+async def hold(path: Path, log: list[str], name: str) -> None:
+    """Take `path`'s lock, note when it's held and released, and yield to other tasks while holding it."""
+    async with file_lock(path):
+        log.append(f"{name} in")
+        await asyncio.sleep(0.01)
+        log.append(f"{name} out")
+
+
+async def test_file_lock_serializes_one_file_and_shares_it_through_symlinks(tmp_path: Path) -> None:
+    target = tmp_path / "f.txt"
+    link = tmp_path / "link.txt"
+    link.symlink_to(target)  # the target doesn't need to exist yet
+    log: list[str] = []
+
+    await asyncio.gather(hold(target, log, "a"), hold(link, log, "b"))
+
+    assert log == ["a in", "a out", "b in", "b out"]
+    assert _entries == {}  # released locks are dropped
+
+
+async def test_file_lock_lets_different_files_overlap(tmp_path: Path) -> None:
+    log: list[str] = []
+    await asyncio.gather(hold(tmp_path / "a.txt", log, "a"), hold(tmp_path / "b.txt", log, "b"))
+    assert log[:2] == ["a in", "b in"]
