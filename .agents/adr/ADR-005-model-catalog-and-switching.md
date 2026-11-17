@@ -1,6 +1,6 @@
 # ADR-005 — Model catalog from OpenRouter, pinned favourites, switching mid-session
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-17
 - **Deciders:** project owner
 
