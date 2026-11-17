@@ -81,9 +81,15 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
    - Migration `3220c661edc2` gives existing rows all seven tools.
    - The web UI has no tool-set picker yet.
    *pi:* `tools/index.ts`, `DEFAULT_TOOL_NAMES` in `core/settings-manager.ts`.
-6. [ ] **System prompt from tools.** Each tool adds a short snippet and guidelines
-   to the system prompt. *pi:* `promptSnippet`/`promptGuidelines` on each tool,
-   `core/system-prompt.ts`.
+6. [x] **System prompt from tools.** Each tool adds a short snippet and guidelines
+   to the system prompt. Built as follows:
+   - `agent/prompt.py` builds the prompt on every run: the session's stored
+     `system_prompt` as the preamble, then tagged `<tools>`, `<rules>` (tool
+     guidelines, de-duplicated, plus general rules) and `<workspace>` sections.
+   - `<workspace>` says paths are relative and that `/` is refused.
+   - Unlike pi, a custom preamble keeps the tool sections, and the cwd is not
+     shown (no host paths in the prompt).
+   *pi:* `promptSnippet`/`promptGuidelines` on each tool, `core/system-prompt.ts`.
 
 ### Phase 2 — Loop control
 7. [ ] **`before_tool_call` / `after_tool_call` hooks.** Called after argument

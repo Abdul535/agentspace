@@ -36,6 +36,8 @@ class ReadTool(Tool[ReadParams]):
         "When you need the full file, continue with offset until complete."
     )
     params = ReadParams
+    snippet = "Read file contents"
+    guidelines = ("Use read to examine files instead of cat or sed.",)
 
     async def execute(self, args: ReadParams, ctx: ToolContext) -> ToolResult:
         """Read the file off the event loop."""

@@ -46,6 +46,7 @@ class FindTool(Tool[FindParams]):
         "(whichever is hit first)."
     )
     params = FindParams
+    snippet = "Find files by glob pattern (respects .gitignore)"
 
     async def execute(self, args: FindParams, ctx: ToolContext) -> ToolResult:
         """Run `rg --files` filtered by the glob, stopping one past the limit."""

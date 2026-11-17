@@ -58,6 +58,12 @@ class EditTool(Tool[EditParams]):
         "just to connect distant changes."
     )
     params = EditParams
+    snippet = "Make precise file edits with exact text replacement, including multiple disjoint edits in one call"
+    guidelines = (
+        "Use edit for targeted changes. Batch changes to one file in a single call.",
+        "Each edits[].old_text must exactly and uniquely match the original file. "
+        "Keep matches short and non-overlapping; merge nearby changes without including large unchanged regions.",
+    )
 
     async def execute(self, args: EditParams, ctx: ToolContext) -> ToolResult:
         """Apply the edits off the event loop; `details` carries a unified diff of the change."""

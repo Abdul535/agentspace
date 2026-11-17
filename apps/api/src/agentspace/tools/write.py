@@ -27,6 +27,8 @@ class WriteTool(Tool[WriteParams]):
         "Creates parent directories as needed. Use only for new files or complete rewrites."
     )
     params = WriteParams
+    snippet = "Create or overwrite files"
+    guidelines = ("Use write only for new files or complete rewrites.",)
 
     async def execute(self, args: WriteParams, ctx: ToolContext) -> ToolResult:
         """Write the file off the event loop and report how many bytes were written."""

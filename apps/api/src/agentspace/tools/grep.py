@@ -50,6 +50,7 @@ class GrepTool(Tool[GrepParams]):
         f"(whichever is hit first). Long lines are truncated to {MAX_LINE_CHARS} chars."
     )
     params = GrepParams
+    snippet = "Search file contents for patterns (respects .gitignore)"
 
     async def execute(self, args: GrepParams, ctx: ToolContext) -> ToolResult:
         """Run rg and format its matches as `path:line: text`, context lines as `path-line- text`."""

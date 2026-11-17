@@ -47,6 +47,7 @@ class BashTool(Tool[BashParams]):
         "Optionally provide a timeout in seconds."
     )
     params = BashParams
+    snippet = "Execute bash commands (ls, grep, find, etc.)"
 
     async def execute(self, args: BashParams, ctx: ToolContext) -> ToolResult:
         """Run the command; a non-zero exit or a timeout becomes an error result that still carries the output."""

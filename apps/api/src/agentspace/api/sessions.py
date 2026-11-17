@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from agentspace.agent.events import AgentEvent, MessageEndEvent
 from agentspace.agent.loop import run_agent
+from agentspace.agent.prompt import build_system_prompt
 from agentspace.agent.tool import ToolContext
 from agentspace.ai.messages import Message, UserMessage
 from agentspace.ai.providers import PROVIDERS
@@ -24,6 +25,7 @@ class SessionCreate(BaseModel):
     provider: str | None = None
     model: str | None = None
     system_prompt: str | None = None
+    """The prompt's preamble; the tool list, rules and workspace sections are added on every run."""
     tool_set: ToolSetName | None = None
     """Which preset of tools the session gets; stored as the list of tool names."""
     title: str | None = None
@@ -108,11 +110,12 @@ async def send_message(
         session.title = body.content[:80]
     run.workspace.mkdir(parents=True, exist_ok=True)
 
+    tools = build_tools(session.tools, bash=settings.enable_bash)
     events = run_agent(
         provider=run.provider,
         model=session.model,
-        system_prompt=session.system_prompt,
-        tools=build_tools(session.tools, bash=settings.enable_bash),
+        system_prompt=build_system_prompt(session.system_prompt, tools),
+        tools=tools,
         history=history,
         prompt=UserMessage(content=body.content),
         ctx=ToolContext(workspace=run.workspace),

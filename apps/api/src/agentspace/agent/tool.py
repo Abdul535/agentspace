@@ -52,6 +52,10 @@ class Tool[P: BaseModel](ABC):
     # TS: abstract readonly name / description — each subclass sets them as class-level constants.
     name: ClassVar[str]
     description: ClassVar[str]
+    snippet: ClassVar[str]
+    """One line for the system prompt's tool list, after pi's `promptSnippet`."""
+    guidelines: ClassVar[tuple[str, ...]] = ()
+    """Rules this tool adds to the system prompt, after pi's `promptGuidelines`."""
     params: type[P]  # TS: the schema class itself (like `typeof Schema`), not an instance
 
     # TS: abstract execute(args: P, ctx: ToolContext): Promise<ToolResult>

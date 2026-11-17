@@ -23,10 +23,9 @@ class Settings(BaseSettings):
     default_provider: str = "openrouter"
     default_model: str = "anthropic/claude-sonnet-5.5"
     default_system_prompt: str = (
-        "You are a helpful assistant working in a workspace folder. "
-        "Use your tools to inspect and change files in it. "
-        "Paths are relative to the workspace."
+        "You are a coding assistant. Help the user inspect files, run commands and change code in their workspace."
     )
+    """The preamble of a new session's system prompt; tool, rules and workspace sections are added on each run."""
     max_turns: int = 50
     max_output_tokens: int = 8192
     """Per model reply. Sent as `max_tokens`; raise it for long file writes."""

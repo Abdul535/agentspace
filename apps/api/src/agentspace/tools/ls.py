@@ -36,6 +36,7 @@ class LsTool(Tool[LsParams]):
         "(whichever is hit first)."
     )
     params = LsParams
+    snippet = "List directory contents"
 
     async def execute(self, args: LsParams, ctx: ToolContext) -> ToolResult:
         """Read the directory off the event loop."""

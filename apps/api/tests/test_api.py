@@ -103,6 +103,9 @@ def test_tool_sets_are_stored_as_names_and_limit_what_the_model_gets(client: Tes
     fake.replies = [text_reply("ok")]
     client.post(f"/sessions/{read_only['id']}/messages", json={"content": "hi"})
     assert [t.name for t in fake.contexts[-1].tools] == ["read", "grep", "find", "ls"]
+    # The system prompt is the stored preamble plus sections for exactly those tools.
+    prompt = fake.contexts[-1].system_prompt
+    assert prompt.startswith(read_only["system_prompt"]) and "- grep: " in prompt and "- edit: " not in prompt
     fake.replies = [text_reply("ok")]
     client.post(f"/sessions/{default['id']}/messages", json={"content": "hi"})
     assert "bash" not in [t.name for t in fake.contexts[-1].tools]
