@@ -4,6 +4,9 @@ FastAPI backend: the agent loop, model providers, tools and sessions. Design: `.
 
 ## Run
 
+Needs [ripgrep](https://github.com/BurntSushi/ripgrep) on `PATH` for the `grep` and `find` tools
+(`brew install ripgrep`).
+
 ```bash
 cd apps/api
 echo 'OPENROUTER_API_KEY=sk-or-...' > .env

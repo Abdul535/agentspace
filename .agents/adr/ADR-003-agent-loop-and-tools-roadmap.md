@@ -58,8 +58,17 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
      not protect secrets on disk: a command can still read `apps/api/.env`. The API
      also has no auth or Host check yet, so a DNS-rebinding page can drive it.
    *pi:* `tools/bash.ts`, `core/bash-executor.ts`, `tools/truncate.ts`.
-4. [ ] **`grep`, `find`, `ls` tools.** Read-only, respect `.gitignore`, and have
-   result limits. *pi:* `tools/grep.ts`, `find.ts`, `ls.ts`.
+4. [x] **`grep`, `find`, `ls` tools.** Read-only, respect `.gitignore`, and have
+   result limits. Built as follows:
+   - `grep` and `find` run ripgrep, which is now a system requirement. `find` uses
+     `rg --files`, not pi's `fd`, so only one binary is needed.
+   - Flags on every search (`tools/ripgrep.py`): `--hidden --no-require-git
+     --sort path`, plus `--glob '!.git'` last, because a later glob wins.
+   - Symlinks are not followed, so a search stays inside the workspace.
+   - Not built yet: pi's case where a match inside the last kept match's trailing
+     context is shown as context. We stop at that match instead.
+   - `ls` is plain Python.
+   *pi:* `tools/grep.ts`, `find.ts`, `ls.ts`.
 5. [ ] **Tool sets.** Name presets: `coding` = read, bash, edit, write and
    `read_only` = read, grep, find, ls. Store the chosen set on the session.
    *pi:* `tools/index.ts`, `DEFAULT_TOOL_NAMES` in `core/settings-manager.ts`.

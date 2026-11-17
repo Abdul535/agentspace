@@ -59,7 +59,7 @@ async def test_write_then_read_then_answer(tmp_path: Path) -> None:
     # Every request carries the system prompt, every tool and the transcript so far.
     last = provider.contexts[-1]
     assert last.system_prompt == "sys"
-    assert [t.name for t in last.tools] == ["read", "bash", "edit", "write"]
+    assert [t.name for t in last.tools] == ["read", "bash", "edit", "write", "grep", "find", "ls"]
     assert [m.role for m in last.messages] == ["user", "assistant", "tool_result", "assistant", "tool_result"]
 
 

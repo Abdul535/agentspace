@@ -2,7 +2,8 @@
 
 A coding agent you host yourself: a FastAPI backend that runs the agent loop, and a Next.js
 chat UI that streams what the agent is doing as it happens. The agent gets a workspace folder
-per session and `read` / `write` tools to work in it.
+per session and tools to work in it: `read`, `write`, `edit`, `grep`, `find`, `ls`, and `bash` when
+enabled.
 
 No agent framework. The loop, tool calling, provider adapters and session storage are all in
 this repo ([pi](https://github.com/earendil-works/pi) is the reference design, not a dependency).
@@ -17,7 +18,8 @@ this repo ([pi](https://github.com/earendil-works/pi) is the reference design, n
 
 ## Run it
 
-Two processes. The backend first:
+Needs [ripgrep](https://github.com/BurntSushi/ripgrep) on `PATH` for the `grep` and `find` tools
+(`brew install ripgrep`). Two processes. The backend first:
 
 ```bash
 cd apps/api
