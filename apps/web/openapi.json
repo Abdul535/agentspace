@@ -434,7 +434,8 @@
           "done",
           "max_turns",
           "error",
-          "aborted"
+          "aborted",
+          "terminated"
         ]
       },
       "HTTPValidationError": {
@@ -1068,6 +1069,11 @@
           "is_error": {
             "type": "boolean",
             "title": "Is Error",
+            "default": false
+          },
+          "terminate": {
+            "type": "boolean",
+            "title": "Terminate",
             "default": false
           }
         },

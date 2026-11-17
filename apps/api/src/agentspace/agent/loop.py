@@ -3,7 +3,8 @@
 A simplified port of pi's `runLoop` (`packages/agent/src/agent-loop.ts`): a
 reply's tool calls run in parallel or one at a time (`LoopConfig.tool_execution`),
 each through prepare, execute and finalize with the `LoopConfig` hooks, and there
-are no steering/follow-up queues yet.
+are no steering/follow-up queues yet. The run ends after a batch in which every
+call set `terminate`.
 The loop holds no storage; callers persist messages from `message_end` events.
 
 `run_loop` reports events through an `emit` callback, so any code holding it can
@@ -163,7 +164,8 @@ async def run_loop(
             break
 
         calls = assistant.tool_calls()
-        results = await execute_tool_calls(calls, tools, ctx, assistant, config, emit)
+        finished = await execute_tool_calls(calls, tools, ctx, assistant, config, emit)
+        results = [f.message for f in finished]
         for result in results:
             add(result)
         await emit(TurnEndEvent(turn=turn, message=assistant, tool_results=results))
@@ -172,8 +174,23 @@ async def run_loop(
         if not calls:
             reason = "done"
             break
+        # Stop only if every call asked to, like pi's `shouldTerminateToolBatch`: any other result still needs a reply.
+        # TS: all(...) is results.every(...)
+        if all(f.terminate for f in finished):
+            reason = "terminated"
+            break
 
     await emit(AgentEndEvent(reason=reason, new_messages=new_messages))
+
+
+# TS: types are hoisted, but Python evaluates signature annotations at def time, so this sits above its first use.
+@dataclass(frozen=True)
+class FinishedCall:
+    """A call's final result, and whether it asked the run to stop after this batch (ADR-003 step 11)."""
+
+    message: ToolResultMessage
+    terminate: bool = False
+    """Kept off the message, as in pi: it steers this run only, and is never sent to the model or saved."""
 
 
 async def execute_tool_calls(
@@ -183,7 +200,7 @@ async def execute_tool_calls(
     assistant: AssistantMessage,
     config: LoopConfig,
     emit: Emit,
-) -> list[ToolResultMessage]:
+) -> list[FinishedCall]:
     """Run a reply's tool calls and return their results in the order the model made the calls."""
     names = {call.name for call in calls}
     # One tool that can't run alongside others makes the whole batch sequential, as in pi.
@@ -203,17 +220,17 @@ async def run_sequentially(
     assistant: AssistantMessage,
     config: LoopConfig,
     emit: Emit,
-) -> list[ToolResultMessage]:
+) -> list[FinishedCall]:
     """Each call starts, runs and reports its result before the next one starts."""
-    results: list[ToolResultMessage] = []
+    results: list[FinishedCall] = []
     for call in calls:
         await emit(ToolExecutionStartEvent(tool_call_id=call.id, tool_name=call.name, arguments=call.arguments))
         if assistant.stop_reason == "length":
-            result = error_result(call, TRUNCATED_CALL.format(name=call.name))
+            result = FinishedCall(error_result(call, TRUNCATED_CALL.format(name=call.name)))
         else:
             result = await execute_tool_call(call, tools, ctx, assistant, config, emit)
-        await emit(ToolExecutionEndEvent(result=result))
-        await emit_result_message(result, emit)
+        await emit(ToolExecutionEndEvent(result=result.message))
+        await emit_result_message(result.message, emit)
         results.append(result)
     return results
 
@@ -225,29 +242,29 @@ async def run_in_parallel(
     assistant: AssistantMessage,
     config: LoopConfig,
     emit: Emit,
-) -> list[ToolResultMessage]:
+) -> list[FinishedCall]:
     """Prepare the calls in order, run the cleared ones at the same time, then report results in call order.
 
     Preparing in order keeps `before_tool_call` approvals one at a time, and no tool starts
     until every call has been cleared or refused, as in pi's `executeToolCallsParallel`.
     """
-    prepared: list[PreparedCall | ToolResultMessage] = []
+    prepared: list[PreparedCall | FinishedCall] = []
     for call in calls:
         await emit(ToolExecutionStartEvent(tool_call_id=call.id, tool_name=call.name, arguments=call.arguments))
         outcome = await prepare_tool_call(call, tools, assistant, config)
-        if isinstance(outcome, ToolResultMessage):  # refused: it ends now, before later calls start
-            await emit(ToolExecutionEndEvent(result=outcome))
+        if isinstance(outcome, FinishedCall):  # refused: it ends now, before later calls start
+            await emit(ToolExecutionEndEvent(result=outcome.message))
         prepared.append(outcome)
 
-    async def run_one(p: PreparedCall) -> ToolResultMessage:
+    async def run_one(p: PreparedCall) -> FinishedCall:
         """Execute and finalize one cleared call, reporting its end as soon as it finishes."""
         result = await finalize_tool_call(p, await execute_prepared(p, ctx, emit), assistant, config)
-        await emit(ToolExecutionEndEvent(result=result))
+        await emit(ToolExecutionEndEvent(result=result.message))
         return result
 
     # TS: like `Promise.all`, but if the run is cancelled every running tool is cancelled too.
     # The calls never raise (failures are results), so one tool can't take its siblings down.
-    tasks: dict[int, asyncio.Task[ToolResultMessage]] = {}
+    tasks: dict[int, asyncio.Task[FinishedCall]] = {}
     async with asyncio.TaskGroup() as group:
         for index, outcome in enumerate(prepared):
             if isinstance(outcome, PreparedCall):
@@ -255,10 +272,10 @@ async def run_in_parallel(
 
     # Results go back in the model's call order, whatever order the tools finished in.
     results = [
-        outcome if isinstance(outcome, ToolResultMessage) else tasks[i].result() for i, outcome in enumerate(prepared)
+        outcome if isinstance(outcome, FinishedCall) else tasks[i].result() for i, outcome in enumerate(prepared)
     ]
     for result in results:
-        await emit_result_message(result, emit)
+        await emit_result_message(result.message, emit)
     return results
 
 
@@ -284,10 +301,10 @@ async def execute_tool_call(
     assistant: AssistantMessage,
     config: LoopConfig,
     emit: Emit,
-) -> ToolResultMessage:
+) -> FinishedCall:
     """Run one tool call through prepare, execute and finalize, like pi's `runToolCall`. Nothing raises."""
     prepared = await prepare_tool_call(call, tools, assistant, config)
-    if isinstance(prepared, ToolResultMessage):  # TS: like `if (prepared.kind === "immediate")`
+    if isinstance(prepared, FinishedCall):  # TS: like `if (prepared.kind === "immediate")`
         return prepared
     result = await execute_prepared(prepared, ctx, emit)
     return await finalize_tool_call(prepared, result, assistant, config)
@@ -295,24 +312,24 @@ async def execute_tool_call(
 
 async def prepare_tool_call(
     call: ToolCall, tools: Sequence[Tool], assistant: AssistantMessage, config: LoopConfig
-) -> PreparedCall | ToolResultMessage:
+) -> PreparedCall | FinishedCall:
     """Find the tool, fix up and validate the arguments, then ask `before_tool_call`. Any failure is an error result."""
     tool = next((t for t in tools if t.name == call.name), None)  # TS: tools.find((t) => t.name === call.name) ?? null
     if tool is None:
-        return error_result(call, f"Tool {call.name} not found.")
+        return FinishedCall(error_result(call, f"Tool {call.name} not found."))
     if call.arguments_error:
-        return error_result(call, f"Invalid arguments for {call.name}: {call.arguments_error}")
+        return FinishedCall(error_result(call, f"Invalid arguments for {call.name}: {call.arguments_error}"))
     # A copy, so a tool's fix-ups never rewrite the call stored in the assistant message.
     # TS: copy.deepcopy is structuredClone.
     try:
         raw = tool.prepare_arguments(copy.deepcopy(call.arguments))
     except Exception as exc:
-        return error_result(call, f"Invalid arguments for {call.name}: {type(exc).__name__}: {exc}")
+        return FinishedCall(error_result(call, f"Invalid arguments for {call.name}: {type(exc).__name__}: {exc}"))
     # TS: `except X` catches only X, like `catch (e) { if (!(e instanceof X)) throw e; ... }`.
     try:
         args = tool.params.model_validate(raw)  # TS: schema.parse(raw)
     except ValidationError as exc:
-        return error_result(call, f"Invalid arguments for {call.name}:\n{exc}")
+        return FinishedCall(error_result(call, f"Invalid arguments for {call.name}:\n{exc}"))
     if config.before_tool_call is not None:
         # A hook that crashes must not wave the call through, so the call is blocked (pi does the same).
         # TS: unlike `catch`, `except Exception` lets cancellation (asyncio.CancelledError) through, so a
@@ -320,9 +337,11 @@ async def prepare_tool_call(
         try:
             decision = await config.before_tool_call(BeforeToolCallContext(assistant, call, args))
         except Exception as exc:
-            return error_result(call, f"Tool call blocked: before_tool_call failed: {type(exc).__name__}: {exc}")
+            text = f"Tool call blocked: before_tool_call failed: {type(exc).__name__}: {exc}"
+            return FinishedCall(error_result(call, text))
         if decision is not None and decision.block:
-            return error_result(call, decision.reason or "Tool execution was blocked.")
+            message = error_result(call, decision.reason or "Tool execution was blocked.")
+            return FinishedCall(message, terminate=decision.terminate)
     return PreparedCall(call=call, tool=tool, args=args)
 
 
@@ -353,24 +372,26 @@ async def execute_prepared(prepared: PreparedCall, ctx: ToolContext, emit: Emit)
 
 async def finalize_tool_call(
     prepared: PreparedCall, result: ToolResult, assistant: AssistantMessage, config: LoopConfig
-) -> ToolResultMessage:
+) -> FinishedCall:
     """Let `after_tool_call` replace fields of the result, then wrap it as the message the model reads."""
-    content, details, is_error = result.content, result.details, result.is_error
+    content, details, is_error, terminate = result.content, result.details, result.is_error, result.terminate
     if config.after_tool_call is not None:
         hook_ctx = AfterToolCallContext(assistant, prepared.call, prepared.args, content, details, is_error)
         try:
             override = await config.after_tool_call(hook_ctx)
         except Exception as exc:
             # The tool already ran, but its result can't be trusted unfiltered, so the model is told it failed.
-            return error_result(prepared.call, f"after_tool_call failed: {type(exc).__name__}: {exc}")
+            return FinishedCall(error_result(prepared.call, f"after_tool_call failed: {type(exc).__name__}: {exc}"))
         if override is not None:
             # `is not None`, not `or`: an empty list or dict is a real replacement, not "keep the old value".
             content = override.content if override.content is not None else content
             details = override.details if override.details is not None else details
             is_error = override.is_error if override.is_error is not None else is_error
-    return ToolResultMessage(
+            terminate = override.terminate if override.terminate is not None else terminate
+    message = ToolResultMessage(
         tool_call_id=prepared.call.id, tool_name=prepared.call.name, content=content, details=details, is_error=is_error
     )
+    return FinishedCall(message, terminate=terminate)
 
 
 def error_result(call: ToolCall, text: str) -> ToolResultMessage:

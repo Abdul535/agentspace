@@ -161,7 +161,7 @@ export interface components {
             timestamp?: number;
         };
         /** @enum {string} */
-        EndReason: "done" | "max_turns" | "error" | "aborted";
+        EndReason: "done" | "max_turns" | "error" | "aborted" | "terminated";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -451,6 +451,11 @@ export interface components {
              * @default false
              */
             is_error: boolean;
+            /**
+             * Terminate
+             * @default false
+             */
+            terminate: boolean;
         };
         /**
          * ToolResultMessage

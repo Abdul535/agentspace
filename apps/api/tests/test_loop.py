@@ -628,3 +628,64 @@ async def test_updates_after_the_call_finished_are_ignored(tmp_path: Path) -> No
 
     assert len(events) == before
     assert not any(isinstance(e, ToolExecutionUpdateEvent) and "late" in e.partial.content[0].text for e in events)
+
+
+class StopTool(EchoTool):
+    """Echoes its text and asks the run to stop after this batch."""
+
+    name = "stop"
+
+    async def execute(self, args: EchoParams, ctx: ToolContext) -> ToolResult:
+        self.ran.append(args.text)
+        return ToolResult(content=[TextContent(text=args.text)], terminate=True)
+
+
+async def test_a_batch_where_every_call_terminates_ends_the_run(tmp_path: Path) -> None:
+    provider = FakeProvider([tool_reply(call("stop", "c1", text="a"), call("stop", "c2", text="b")), text_reply("x")])
+    events = await run(provider, tmp_path, tools=[StopTool()])
+
+    assert len(provider.contexts) == 1  # the model isn't asked again
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "terminated"
+    # Both results are still saved, and the flag isn't part of the message.
+    results = [m for m in ended(events) if isinstance(m, ToolResultMessage)]
+    assert [r.content[0].text for r in results] == ["a", "b"]
+    assert "terminate" not in results[0].model_dump()
+
+
+async def test_one_call_that_does_not_terminate_keeps_the_run_going(tmp_path: Path) -> None:
+    replies: list[Reply] = [tool_reply(call("stop", "c1", text="a"), call("echo", "c2", text="b")), text_reply("ok")]
+    provider = FakeProvider(replies)
+    events = await run(provider, tmp_path, tools=[StopTool(), EchoTool()])
+
+    assert len(provider.contexts) == 2
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"
+
+
+async def test_hooks_can_set_or_clear_terminate(tmp_path: Path) -> None:
+    async def block_and_stop(ctx: BeforeToolCallContext) -> BeforeToolCallResult:
+        return BeforeToolCallResult(block=True, reason="No.", terminate=True)
+
+    async def stop_after(ctx: AfterToolCallContext) -> AfterToolCallResult:
+        return AfterToolCallResult(terminate=True)
+
+    async def keep_going(ctx: AfterToolCallContext) -> AfterToolCallResult:
+        return AfterToolCallResult(terminate=False)
+
+    cases: list[tuple[list[Tool], LoopConfig, str]] = [
+        ([EchoTool()], LoopConfig(before_tool_call=block_and_stop), "terminated"),
+        ([EchoTool()], LoopConfig(after_tool_call=stop_after), "terminated"),
+        ([StopTool()], LoopConfig(after_tool_call=keep_going), "done"),
+    ]
+    for tools, config, reason in cases:
+        name = tools[0].name
+        provider = FakeProvider([tool_reply(call(name, text="a")), text_reply("ok")])
+        events = await run(provider, tmp_path, tools=tools, config=config)
+        assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == reason
+
+
+async def test_a_failing_tool_never_terminates_the_run(tmp_path: Path) -> None:
+    # The model must see the error, so a call that fails before running can't end the run.
+    provider = FakeProvider([tool_reply(call("stop", text=1)), text_reply("ok")])
+    events = await run(provider, tmp_path, tools=[StopTool()])
+
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"

@@ -32,6 +32,8 @@ class BeforeToolCallResult:
 
     block: bool = False
     reason: str | None = None
+    terminate: bool = False
+    """With `block`, also ask the run to stop after this batch, as `ToolResult.terminate` does."""
 
 
 @dataclass(frozen=True)
@@ -53,6 +55,7 @@ class AfterToolCallResult:
     content: list[TextContent] | None = None
     details: dict[str, Any] | None = None
     is_error: bool | None = None
+    terminate: bool | None = None
 
 
 # TS: type BeforeToolCall = (ctx: BeforeToolCallContext) => Promise<BeforeToolCallResult | undefined>

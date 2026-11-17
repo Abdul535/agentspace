@@ -139,8 +139,15 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
       a delta. Updates are streamed, never sent to the model or saved.
     - `bash` checks its output file every 100 ms and sends the last 8 KB when it
       grew. The web app shows the latest snapshot inside the running tool call.
-11. [ ] **Early termination.** Add `terminate` to `ToolResult`, and stop after a
+11. [x] **Early termination.** Add `terminate` to `ToolResult`, and stop after a
     batch when every result in it sets it. *pi:* `shouldTerminateToolBatch`.
+    Built as follows:
+    - `BeforeToolCallResult.terminate` (with `block`) and
+      `AfterToolCallResult.terminate` (`None` keeps the tool's value) can set it too.
+    - The loop carries the flag in `FinishedCall`, next to the result message,
+      so it is never sent to the model or saved.
+    - Error results (unknown tool, bad arguments, failed hooks, truncated calls)
+      never terminate. The run ends with `reason="terminated"`.
 12. [ ] **`finish_turn` hook.** Can return `end` or `continue` after each turn.
     It replaces the hard `max_turns` cut with a policy. *pi:* `FinishTurn`.
 

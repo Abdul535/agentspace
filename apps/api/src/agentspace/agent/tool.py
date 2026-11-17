@@ -46,6 +46,9 @@ class ToolResult(BaseModel):
     """Structured facts for the UI and logs (paths, line ranges, sizes); never sent to the model."""
     is_error: bool = False
     """Report a failure without raising, keeping `details`; `ToolError` is the shortcut when there are none."""
+    terminate: bool = False
+    """Ask the run to stop after this batch instead of asking the model again (ADR-003 step 11).
+    It stops only if every call in the batch asks; never sent to the model or saved."""
 
     # TS: a static factory; `cls` is the class itself and `Self` its instance type.
     @classmethod
