@@ -1,10 +1,15 @@
 "use client";
 
+import { code } from "@streamdown/code";
 import { AlertCircle } from "lucide-react";
+import { Streamdown } from "streamdown";
 
 import { ToolCallView } from "@/components/chat/tool-call";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import type { AssistantMessage, Message, ToolResultMessage } from "@/lib/api/client";
+
+// Shiki highlighting for fenced code; defined once so Streamdown's memo isn't broken by a new object each render.
+const plugins = { code };
 
 /** The transcript: user prompts, assistant replies with their tool calls inline. Tool results render inside their call. */
 export function MessageList({
@@ -40,10 +45,9 @@ export function MessageList({
         return null;
       })}
       {draft !== null && (
-        <p className="text-pretty whitespace-pre-wrap">
+        <Streamdown plugins={plugins} caret="block" isAnimating>
           {draft}
-          <span className="ml-0.5 inline-block h-4 w-1.5 animate-pulse bg-foreground/60 align-text-bottom" />
-        </p>
+        </Streamdown>
       )}
     </div>
   );
@@ -72,9 +76,9 @@ function AssistantReply({
     <div className="flex flex-col gap-2">
       {message.content.map((block, index) =>
         block.type === "text" ? (
-          <p key={index} className="text-pretty whitespace-pre-wrap">
+          <Streamdown key={index} plugins={plugins} mode="static">
             {block.text}
-          </p>
+          </Streamdown>
         ) : (
           <ToolCallView
             key={block.id}
