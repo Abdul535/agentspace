@@ -307,6 +307,7 @@ async def test_cancelling_while_before_tool_call_waits_stops_the_run(tmp_path: P
     with pytest.raises(asyncio.CancelledError):
         await task
     assert echo.ran == []
+    assert len(provider.contexts) == 1  # the model was never asked again
 
 
 class StrictEchoTool(EchoTool):

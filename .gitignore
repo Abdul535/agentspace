@@ -12,3 +12,7 @@ node_modules/
 # draw.io desktop backup and temp files
 *.bkp
 *.dtmp
+
+# Personal learning notes, kept local
+.agents/learning-plan.md
+.agents/debug-sessions/
