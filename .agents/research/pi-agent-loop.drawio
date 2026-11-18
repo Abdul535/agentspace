@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram id="Z0epN3Ks1JmbX7jKh5L6" name="Page-1">
-    <mxGraphModel dx="1800" dy="3431" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" background="none" math="0" shadow="0" adaptiveColors="auto">
+    <mxGraphModel dx="812" dy="1766" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" background="none" math="0" shadow="0" adaptiveColors="auto">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -250,217 +250,252 @@
         <mxCell id="r9" edge="1" parent="1" source="r_end" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;fontSize=10;" target="r_msgs" value="all calls done">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-      <mxCell id="o_wrap" value="agentspace today: what the web app talks to (apps/api: api/sessions.py, agent/loop.py). Colors here show status" style="swimlane;startSize=28;rounded=1;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
-  <mxGeometry x="1480" y="-58" width="1200" height="120" as="geometry"/>
-</mxCell>
-<mxCell id="o_w_prompt" value="&lt;b&gt;POST /sessions/{id}/messages&lt;/b&gt;&lt;br&gt;→ run_agent · 409 if a run is going" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="o_wrap">
-  <mxGeometry x="15" y="45" width="180" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_w_cont" value="&lt;b&gt;continue()&lt;/b&gt;&lt;br&gt;not built (step 15)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" vertex="1" parent="o_wrap">
-  <mxGeometry x="210" y="45" width="170" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_w_steer" value="&lt;b&gt;steer()&lt;/b&gt;&lt;br&gt;not built (step 14)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" vertex="1" parent="o_wrap">
-  <mxGeometry x="395" y="45" width="190" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_w_follow" value="&lt;b&gt;followUp()&lt;/b&gt;&lt;br&gt;not built (step 14)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" vertex="1" parent="o_wrap">
-  <mxGeometry x="600" y="45" width="200" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_w_abort" value="&lt;b&gt;abort&lt;/b&gt;: closing the SSE stream&lt;br&gt;cancels the loop task&lt;br&gt;(abort route: step 13)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="o_wrap">
-  <mxGeometry x="815" y="45" width="180" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_w_sub" value="&lt;b&gt;SSE stream&lt;/b&gt; (run_agent: task → Queue)&lt;br&gt;route saves each message_end" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="o_wrap">
-  <mxGeometry x="1010" y="45" width="175" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_left" value="run_loop (agent/loop.py)" style="swimlane;startSize=28;rounded=1;html=1;fillColor=none;strokeColor=#82b366;" vertex="1" parent="1">
-  <mxGeometry x="1480" y="170" width="720" height="1430" as="geometry"/>
-</mxCell>
-<mxCell id="o_start" value="run_loop(prompt)&lt;br&gt;emit agent_start · prompt message_start / end" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="210" width="280" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_poll" value="no steering poll&lt;br&gt;(step 14)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="295" width="280" height="50" as="geometry"/>
-</mxCell>
-<mxCell id="o_prep" value="&lt;b&gt;for turn in 1..max_turns&lt;/b&gt;: emit turn_start&lt;br&gt;no prepareNextTurn: compaction is step 17" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="385" width="280" height="60" as="geometry"/>
-</mxCell>
-<mxCell id="o_push" value="no pending messages to push,&lt;br&gt;no tool-change messages (step 22)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="480" width="280" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_req" value="no prepareRequest&lt;br&gt;(step 19)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="570" width="280" height="50" as="geometry"/>
-</mxCell>
-<mxCell id="o_stream" value="&lt;b&gt;provider.stream(model, Context)&lt;/b&gt;&lt;br&gt;emit message_start · message_update · message_end" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="655" width="280" height="60" as="geometry"/>
-</mxCell>
-<mxCell id="o_streamnote" value="Updates only for text deltas and finished tool calls. No transformContext / convertToLlm (16, 17), getApiKey (20) or thinking (18).&lt;br&gt;&lt;br&gt;Extra: a stream with no final message becomes an error reply." style="shape=note;size=14;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="1">
-  <mxGeometry x="1960" y="630" width="240" height="105" as="geometry"/>
-</mxCell>
-<mxCell id="o_err" value="stop_reason&lt;br&gt;error / aborted?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1680" y="750" width="200" height="80" as="geometry"/>
-</mxCell>
-<mxCell id="o_errout" value="finish_turn (can't keep it going) · turn_end&lt;br&gt;reason = error | aborted" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1960" y="760" width="240" height="60" as="geometry"/>
-</mxCell>
-<mxCell id="o_tc" value="calls = assistant.tool_calls()&lt;br&gt;(no branch: an empty batch does nothing)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="875" width="280" height="60" as="geometry"/>
-</mxCell>
-<mxCell id="o_batch" value="&lt;b&gt;execute_tool_calls()&lt;/b&gt; →&lt;br&gt;(stop_reason length → every call fails&lt;br&gt;with TRUNCATED_CALL)&lt;br&gt;returns FinishedCall list" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="975" width="280" height="75" as="geometry"/>
-</mxCell>
-<mxCell id="o_finish" value="&lt;b&gt;finish_turn()&lt;/b&gt; → end | continue | None&lt;br&gt;emit turn_end" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="1090" width="280" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_end" value="decision?&lt;br&gt;end → stop · continue → next turn" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1650" y="1175" width="260" height="85" as="geometry"/>
-</mxCell>
-<mxCell id="o_more" value="no calls → done&lt;br&gt;every call terminate → terminated&lt;br&gt;else next turn" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="1285" width="280" height="95" as="geometry"/>
-</mxCell>
-<mxCell id="o_follow" value="out of turns → reason = max_turns&lt;br&gt;(pi has no cap; follow-ups: step 14)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1640" y="1420" width="280" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_agentend" value="emit agent_end(reason, new_messages)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="1660" y="1525" width="240" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_right" value="Tool batch: execute_tool_calls (agent/loop.py)" style="swimlane;startSize=28;rounded=1;html=1;fillColor=none;strokeColor=#82b366;" vertex="1" parent="1">
-  <mxGeometry x="2240" y="170" width="440" height="960" as="geometry"/>
-</mxCell>
-<mxCell id="o_mode" value="tool_execution sequential,&lt;br&gt;a tool's execution_mode sequential,&lt;br&gt;or a cut-off reply?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2330" y="210" width="260" height="100" as="geometry"/>
-</mxCell>
-<mxCell id="o_par" value="&lt;b&gt;no → run_in_parallel&lt;/b&gt;: prepare in order, then&lt;br&gt;asyncio.TaskGroup (≈ Promise.all, cancels the rest)&lt;br&gt;&lt;b&gt;yes → run_sequentially&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2280" y="340" width="360" height="70" as="geometry"/>
-</mxCell>
-<mxCell id="o_rstart" value="emit tool_execution_start" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2280" y="445" width="360" height="40" as="geometry"/>
-</mxCell>
-<mxCell id="o_rprep" value="&lt;b&gt;prepare_tool_call()&lt;/b&gt;&lt;br&gt;tool found? → arguments_error? → prepare_arguments(copy)&lt;br&gt;→ model_validate → &lt;b&gt;before_tool_call&lt;/b&gt;&lt;br&gt;no abort check (cancel stops the task) · a crashing hook blocks" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2280" y="515" width="360" height="85" as="geometry"/>
-</mxCell>
-<mxCell id="o_rimm" value="returned a&lt;br&gt;FinishedCall (refused)?" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2360" y="630" width="200" height="80" as="geometry"/>
-</mxCell>
-<mxCell id="o_rexec" value="&lt;b&gt;execute_prepared()&lt;/b&gt;&lt;br&gt;tool.execute(args, ctx) · ctx.on_update → tool_execution_update&lt;br&gt;ToolError / any exception → error result" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2280" y="745" width="360" height="65" as="geometry"/>
-</mxCell>
-<mxCell id="o_rfin" value="&lt;b&gt;finalize_tool_call()&lt;/b&gt;&lt;br&gt;&lt;b&gt;after_tool_call&lt;/b&gt; overrides content / details / is_error /&lt;br&gt;terminate · a crashing hook → error result" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2280" y="845" width="360" height="60" as="geometry"/>
-</mxCell>
-<mxCell id="o_rend" value="emit tool_execution_end (as each call finishes)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2280" y="940" width="360" height="40" as="geometry"/>
-</mxCell>
-<mxCell id="o_rmsgs" value="result messages in call order&lt;br&gt;terminate stays on FinishedCall, never on the message" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2280" y="1015" width="360" height="55" as="geometry"/>
-</mxCell>
-<mxCell id="o_wiring" value="&lt;b&gt;Not wired up yet&lt;/b&gt;&lt;br&gt;send_message passes no LoopConfig, so the hooks (steps 7–12) exist but the app runs with the defaults: nothing blocks a call or asks for approval.&lt;br&gt;&lt;br&gt;Tools still run on the host: the Workspace protocol (ADR-004) is next." style="shape=note;size=14;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2240" y="1170" width="440" height="125" as="geometry"/>
-</mxCell>
-<mxCell id="o_legend" value="Status (agentspace side)" style="swimlane;startSize=24;rounded=1;html=1;fillColor=none;strokeColor=#999999;fontSize=11;" vertex="1" parent="1">
-  <mxGeometry x="2240" y="1320" width="440" height="90" as="geometry"/>
-</mxCell>
-<mxCell id="o_lg1" value="built as in pi" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="o_legend">
-  <mxGeometry x="10" y="35" width="130" height="40" as="geometry"/>
-</mxCell>
-<mxCell id="o_lg2" value="built differently / partly" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" vertex="1" parent="o_legend">
-  <mxGeometry x="155" y="35" width="130" height="40" as="geometry"/>
-</mxCell>
-<mxCell id="o_lg3" value="not built (ADR-003 step)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=10;" vertex="1" parent="o_legend">
-  <mxGeometry x="300" y="35" width="130" height="40" as="geometry"/>
-</mxCell>
-<mxCell id="oe0" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_w_prompt" target="o_start">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe1" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" edge="1" parent="1" source="o_start" target="o_poll">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe2" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" edge="1" parent="1" source="o_poll" target="o_prep">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe3" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" edge="1" parent="1" source="o_prep" target="o_push">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe4" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" edge="1" parent="1" source="o_push" target="o_req">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe5" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" edge="1" parent="1" source="o_req" target="o_stream">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe6" value="no" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_err" target="o_tc">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe7" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_tc" target="o_batch">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe8" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_batch" target="o_finish">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe9" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_finish" target="o_end">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe10" value="neither" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_end" target="o_more">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe11" value="loop ran out" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_more" target="o_follow">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe12" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_follow" target="o_agentend">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe13" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_stream" target="o_err">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe14" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_mode" target="o_par">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe15" value="for each call" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_par" target="o_rstart">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe16" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_rstart" target="o_rprep">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe17" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_rprep" target="o_rimm">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe18" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_rexec" target="o_rfin">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe19" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_rfin" target="o_rend">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe20" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_rend" target="o_rmsgs">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe_err" value="yes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_err" target="o_errout">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe_imm_no" value="no" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" edge="1" parent="1" source="o_rimm" target="o_rexec">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe_imm_yes" value="yes: error result" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=1;entryY=0.5;strokeColor=#b85450;fontColor=#b85450;fontSize=10;" edge="1" parent="1" source="o_rimm" target="o_rend">
-  <mxGeometry x="-0.8" relative="1" as="geometry"><Array as="points"><mxPoint x="2665" y="670"/><mxPoint x="2665" y="960"/></Array></mxGeometry>
-</mxCell>
-<mxCell id="oe_note" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endArrow=none;dashed=1;" edge="1" parent="1" source="o_stream" target="o_streamnote">
-  <mxGeometry relative="1" as="geometry"></mxGeometry>
-</mxCell>
-<mxCell id="oe_loop" value="next turn" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=0;exitY=0.5;entryX=0;entryY=0.5;strokeColor=#6c8ebf;fontColor=#6c8ebf;" edge="1" parent="1" source="o_more" target="o_prep">
-  <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1590" y="1332"/><mxPoint x="1590" y="415"/></Array></mxGeometry>
-</mxCell>
-<mxCell id="oe_cont" value="continue" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=0;exitY=0.5;entryX=0;entryY=0.75;strokeColor=#82b366;fontColor=#5a8a3c;" edge="1" parent="1" source="o_end" target="o_prep">
-  <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1540" y="1217"/><mxPoint x="1540" y="430"/></Array></mxGeometry>
-</mxCell>
-<mxCell id="oe_endyes" value="end" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="o_end" target="o_agentend">
-  <mxGeometry x="-0.75" relative="1" as="geometry"><Array as="points"><mxPoint x="1960" y="1217"/><mxPoint x="1960" y="1552"/></Array></mxGeometry>
-</mxCell>
-<mxCell id="oe_done" value="done / terminated" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=1;entryY=0.25;" edge="1" parent="1" source="o_more" target="o_agentend">
-  <mxGeometry x="0.1" relative="1" as="geometry"><Array as="points"><mxPoint x="1940" y="1332"/><mxPoint x="1940" y="1539"/></Array></mxGeometry>
-</mxCell>
-<mxCell id="oe_b1" value="execute_tool_calls()" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=1;exitY=0.3;entryX=0;entryY=0.5;strokeColor=#82b366;" edge="1" parent="1" source="o_batch" target="o_mode">
-  <mxGeometry x="0.85" relative="1" as="geometry"><Array as="points"><mxPoint x="2222" y="998"/><mxPoint x="2222" y="260"/></Array></mxGeometry>
-</mxCell>
-<mxCell id="oe_b2" value="results → messages" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=0;exitY=0.5;entryX=1;entryY=0.75;strokeColor=#82b366;dashed=1;" edge="1" parent="1" source="o_rmsgs" target="o_batch">
-  <mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="2210" y="1042"/><mxPoint x="2210" y="1031"/></Array></mxGeometry>
-</mxCell>
-</root>
+        <mxCell id="o_wrap" parent="1" style="swimlane;startSize=28;rounded=1;html=1;fillColor=#f5f5f5;strokeColor=#666666;" value="agentspace today: what the web app talks to (apps/api: api/sessions.py, agent/loop.py). Colors here show status" vertex="1">
+          <mxGeometry height="120" width="1200" x="1681" y="-63" as="geometry" />
+        </mxCell>
+        <mxCell id="o_w_prompt" parent="o_wrap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="&lt;b&gt;POST /sessions/{id}/messages&lt;/b&gt;&lt;br&gt;→ run_agent · 409 if a run is going" vertex="1">
+          <mxGeometry height="55" width="180" x="15" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="o_w_cont" parent="o_wrap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" value="&lt;b&gt;continue()&lt;/b&gt;&lt;br&gt;not built (step 15)" vertex="1">
+          <mxGeometry height="55" width="170" x="210" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="o_w_steer" parent="o_wrap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" value="&lt;b&gt;steer()&lt;/b&gt;&lt;br&gt;not built (step 14)" vertex="1">
+          <mxGeometry height="55" width="190" x="395" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="o_w_follow" parent="o_wrap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" value="&lt;b&gt;followUp()&lt;/b&gt;&lt;br&gt;not built (step 14)" vertex="1">
+          <mxGeometry height="55" width="200" x="600" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="o_w_abort" parent="o_wrap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="&lt;b&gt;abort&lt;/b&gt;: closing the SSE stream&lt;br&gt;cancels the loop task&lt;br&gt;(abort route: step 13)" vertex="1">
+          <mxGeometry height="55" width="180" x="815" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="o_w_sub" parent="o_wrap" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="&lt;b&gt;SSE stream&lt;/b&gt; (run_agent: task → Queue)&lt;br&gt;route saves each message_end" vertex="1">
+          <mxGeometry height="55" width="175" x="1010" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="o_left" parent="1" style="swimlane;startSize=28;rounded=1;html=1;fillColor=none;strokeColor=#82b366;" value="run_loop (agent/loop.py)" vertex="1">
+          <mxGeometry height="1430" width="720" x="1681" y="165" as="geometry" />
+        </mxCell>
+        <mxCell id="o_start" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="run_loop(prompt)&lt;br&gt;emit agent_start · prompt message_start / end" vertex="1">
+          <mxGeometry height="55" width="280" x="1841" y="205" as="geometry" />
+        </mxCell>
+        <mxCell id="o_poll" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" value="no steering poll&lt;br&gt;(step 14)" vertex="1">
+          <mxGeometry height="50" width="280" x="1841" y="290" as="geometry" />
+        </mxCell>
+        <mxCell id="o_prep" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="&lt;b&gt;for turn in 1..max_turns&lt;/b&gt;: emit turn_start&lt;br&gt;no prepareNextTurn: compaction is step 17" vertex="1">
+          <mxGeometry height="60" width="280" x="1841" y="380" as="geometry" />
+        </mxCell>
+        <mxCell id="o_push" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" value="no pending messages to push,&lt;br&gt;no tool-change messages (step 22)" vertex="1">
+          <mxGeometry height="55" width="280" x="1841" y="475" as="geometry" />
+        </mxCell>
+        <mxCell id="o_req" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=11;" value="no prepareRequest&lt;br&gt;(step 19)" vertex="1">
+          <mxGeometry height="50" width="280" x="1841" y="565" as="geometry" />
+        </mxCell>
+        <mxCell id="o_stream" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="&lt;b&gt;provider.stream(model, Context)&lt;/b&gt;&lt;br&gt;emit message_start · message_update · message_end" vertex="1">
+          <mxGeometry height="60" width="280" x="1841" y="650" as="geometry" />
+        </mxCell>
+        <mxCell id="o_streamnote" parent="1" style="shape=note;size=14;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" value="Updates only for text deltas and finished tool calls. No transformContext / convertToLlm (16, 17), getApiKey (20) or thinking (18).&lt;br&gt;&lt;br&gt;Extra: a stream with no final message becomes an error reply." vertex="1">
+          <mxGeometry height="105" width="240" x="2161" y="625" as="geometry" />
+        </mxCell>
+        <mxCell id="o_err" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="stop_reason&lt;br&gt;error / aborted?" vertex="1">
+          <mxGeometry height="80" width="200" x="1881" y="745" as="geometry" />
+        </mxCell>
+        <mxCell id="o_errout" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="finish_turn (can&#39;t keep it going) · turn_end&lt;br&gt;reason = error | aborted" vertex="1">
+          <mxGeometry height="60" width="240" x="2161" y="755" as="geometry" />
+        </mxCell>
+        <mxCell id="o_tc" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="calls = assistant.tool_calls()&lt;br&gt;(no branch: an empty batch does nothing)" vertex="1">
+          <mxGeometry height="60" width="280" x="1841" y="870" as="geometry" />
+        </mxCell>
+        <mxCell id="o_batch" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="&lt;b&gt;execute_tool_calls()&lt;/b&gt; →&lt;br&gt;(stop_reason length → every call fails&lt;br&gt;with TRUNCATED_CALL)&lt;br&gt;returns FinishedCall list" vertex="1">
+          <mxGeometry height="75" width="280" x="1841" y="970" as="geometry" />
+        </mxCell>
+        <mxCell id="o_finish" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="&lt;b&gt;finish_turn()&lt;/b&gt; → end | continue | None&lt;br&gt;emit turn_end" vertex="1">
+          <mxGeometry height="55" width="280" x="1841" y="1085" as="geometry" />
+        </mxCell>
+        <mxCell id="o_end" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="decision?&lt;br&gt;end → stop · continue → next turn" vertex="1">
+          <mxGeometry height="85" width="260" x="1851" y="1170" as="geometry" />
+        </mxCell>
+        <mxCell id="o_more" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="no calls → done&lt;br&gt;every call terminate → terminated&lt;br&gt;else next turn" vertex="1">
+          <mxGeometry height="95" width="280" x="1841" y="1280" as="geometry" />
+        </mxCell>
+        <mxCell id="o_follow" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="out of turns → reason = max_turns&lt;br&gt;(pi has no cap; follow-ups: step 14)" vertex="1">
+          <mxGeometry height="55" width="280" x="1841" y="1415" as="geometry" />
+        </mxCell>
+        <mxCell id="o_agentend" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="emit agent_end(reason, new_messages)" vertex="1">
+          <mxGeometry height="55" width="240" x="1861" y="1520" as="geometry" />
+        </mxCell>
+        <mxCell id="o_right" parent="1" style="swimlane;startSize=28;rounded=1;html=1;fillColor=none;strokeColor=#82b366;" value="Tool batch: execute_tool_calls (agent/loop.py)" vertex="1">
+          <mxGeometry height="960" width="440" x="2441" y="165" as="geometry" />
+        </mxCell>
+        <mxCell id="o_mode" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="tool_execution sequential,&lt;br&gt;a tool&#39;s execution_mode sequential,&lt;br&gt;or a cut-off reply?" vertex="1">
+          <mxGeometry height="100" width="260" x="2531" y="205" as="geometry" />
+        </mxCell>
+        <mxCell id="o_par" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="&lt;b&gt;no → run_in_parallel&lt;/b&gt;: prepare in order, then&lt;br&gt;asyncio.TaskGroup (≈ Promise.all, cancels the rest)&lt;br&gt;&lt;b&gt;yes → run_sequentially&lt;/b&gt;" vertex="1">
+          <mxGeometry height="70" width="360" x="2481" y="335" as="geometry" />
+        </mxCell>
+        <mxCell id="o_rstart" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="emit tool_execution_start" vertex="1">
+          <mxGeometry height="40" width="360" x="2481" y="440" as="geometry" />
+        </mxCell>
+        <mxCell id="o_rprep" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="&lt;b&gt;prepare_tool_call()&lt;/b&gt;&lt;br&gt;tool found? → arguments_error? → prepare_arguments(copy)&lt;br&gt;→ model_validate → &lt;b&gt;before_tool_call&lt;/b&gt;&lt;br&gt;no abort check (cancel stops the task) · a crashing hook blocks" vertex="1">
+          <mxGeometry height="85" width="360" x="2481" y="510" as="geometry" />
+        </mxCell>
+        <mxCell id="o_rimm" parent="1" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="returned a&lt;br&gt;FinishedCall (refused)?" vertex="1">
+          <mxGeometry height="80" width="200" x="2561" y="625" as="geometry" />
+        </mxCell>
+        <mxCell id="o_rexec" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="&lt;b&gt;execute_prepared()&lt;/b&gt;&lt;br&gt;tool.execute(args, ctx) · ctx.on_update → tool_execution_update&lt;br&gt;ToolError / any exception → error result" vertex="1">
+          <mxGeometry height="65" width="360" x="2481" y="740" as="geometry" />
+        </mxCell>
+        <mxCell id="o_rfin" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="&lt;b&gt;finalize_tool_call()&lt;/b&gt;&lt;br&gt;&lt;b&gt;after_tool_call&lt;/b&gt; overrides content / details / is_error /&lt;br&gt;terminate · a crashing hook → error result" vertex="1">
+          <mxGeometry height="60" width="360" x="2481" y="840" as="geometry" />
+        </mxCell>
+        <mxCell id="o_rend" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="emit tool_execution_end (as each call finishes)" vertex="1">
+          <mxGeometry height="40" width="360" x="2481" y="935" as="geometry" />
+        </mxCell>
+        <mxCell id="o_rmsgs" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" value="result messages in call order&lt;br&gt;terminate stays on FinishedCall, never on the message" vertex="1">
+          <mxGeometry height="55" width="360" x="2481" y="1010" as="geometry" />
+        </mxCell>
+        <mxCell id="o_wiring" parent="1" style="shape=note;size=14;whiteSpace=wrap;html=1;align=left;spacingLeft=8;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" value="&lt;b&gt;Not wired up yet&lt;/b&gt;&lt;br&gt;send_message passes no LoopConfig, so the hooks (steps 7–12) exist but the app runs with the defaults: nothing blocks a call or asks for approval.&lt;br&gt;&lt;br&gt;Tools still run on the host: the Workspace protocol (ADR-004) is next." vertex="1">
+          <mxGeometry height="125" width="440" x="2441" y="1165" as="geometry" />
+        </mxCell>
+        <mxCell id="o_legend" parent="1" style="swimlane;startSize=24;rounded=1;html=1;fillColor=none;strokeColor=#999999;fontSize=11;" value="Status (agentspace side)" vertex="1">
+          <mxGeometry height="90" width="440" x="2441" y="1315" as="geometry" />
+        </mxCell>
+        <mxCell id="o_lg1" parent="o_legend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="built as in pi" vertex="1">
+          <mxGeometry height="40" width="130" x="10" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="o_lg2" parent="o_legend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;" value="built differently / partly" vertex="1">
+          <mxGeometry height="40" width="130" x="155" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="o_lg3" parent="o_legend" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;dashed=1;fontColor=#777777;fontSize=10;" value="not built (ADR-003 step)" vertex="1">
+          <mxGeometry height="40" width="130" x="300" y="35" as="geometry" />
+        </mxCell>
+        <mxCell id="oe0" edge="1" parent="1" source="o_w_prompt" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_start" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe1" edge="1" parent="1" source="o_start" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" target="o_poll" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe2" edge="1" parent="1" source="o_poll" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" target="o_prep" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe3" edge="1" parent="1" source="o_prep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" target="o_push" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe4" edge="1" parent="1" source="o_push" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" target="o_req" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe5" edge="1" parent="1" source="o_req" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;dashed=1;strokeColor=#999999;" target="o_stream" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe6" edge="1" parent="1" source="o_err" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_tc" value="no">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe7" edge="1" parent="1" source="o_tc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_batch" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe8" edge="1" parent="1" source="o_batch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_finish" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe9" edge="1" parent="1" source="o_finish" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_end" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe10" edge="1" parent="1" source="o_end" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_more" value="neither">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe11" edge="1" parent="1" source="o_more" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_follow" value="loop ran out">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe12" edge="1" parent="1" source="o_follow" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_agentend" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe13" edge="1" parent="1" source="o_stream" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_err" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe14" edge="1" parent="1" source="o_mode" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_par" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe15" edge="1" parent="1" source="o_par" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_rstart" value="for each call">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe16" edge="1" parent="1" source="o_rstart" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_rprep" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe17" edge="1" parent="1" source="o_rprep" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_rimm" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe18" edge="1" parent="1" source="o_rexec" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_rfin" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe19" edge="1" parent="1" source="o_rfin" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_rend" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe20" edge="1" parent="1" source="o_rend" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_rmsgs" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe_err" edge="1" parent="1" source="o_err" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_errout" value="yes">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe_imm_no" edge="1" parent="1" source="o_rimm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;" target="o_rexec" value="no">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe_imm_yes" edge="1" parent="1" source="o_rimm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=1;entryY=0.5;strokeColor=#b85450;fontColor=#b85450;fontSize=10;" target="o_rend" value="yes: error result">
+          <mxGeometry relative="1" x="-0.8" as="geometry">
+            <Array as="points">
+              <mxPoint x="2866" y="665" />
+              <mxPoint x="2866" y="955" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="oe_note" edge="1" parent="1" source="o_stream" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;endArrow=none;dashed=1;" target="o_streamnote" value="">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="oe_loop" edge="1" parent="1" source="o_more" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=0;exitY=0.5;entryX=0;entryY=0.5;strokeColor=#6c8ebf;fontColor=#6c8ebf;" target="o_prep" value="next turn">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1791" y="1327" />
+              <mxPoint x="1791" y="410" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="oe_cont" edge="1" parent="1" source="o_end" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=0;exitY=0.5;entryX=0;entryY=0.75;strokeColor=#82b366;fontColor=#5a8a3c;" target="o_prep" value="continue">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1741" y="1212" />
+              <mxPoint x="1741" y="425" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="oe_endyes" edge="1" parent="1" source="o_end" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=1;entryY=0.5;" target="o_agentend" value="end">
+          <mxGeometry relative="1" x="-0.75" as="geometry">
+            <Array as="points">
+              <mxPoint x="2161" y="1212" />
+              <mxPoint x="2161" y="1547" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="oe_done" edge="1" parent="1" source="o_more" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=1;exitY=0.5;entryX=1;entryY=0.25;" target="o_agentend" value="done / terminated">
+          <mxGeometry relative="1" x="0.1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2141" y="1327" />
+              <mxPoint x="2141" y="1534" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="oe_b1" edge="1" parent="1" source="o_batch" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=1;exitY=0.3;entryX=0;entryY=0.5;strokeColor=#82b366;" target="o_mode" value="execute_tool_calls()">
+          <mxGeometry relative="1" x="0.85" as="geometry">
+            <Array as="points">
+              <mxPoint x="2423" y="993" />
+              <mxPoint x="2423" y="255" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="oe_b2" edge="1" parent="1" source="o_rmsgs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=block;exitX=0;exitY=0.5;entryX=1;entryY=0.75;strokeColor=#82b366;dashed=1;" target="o_batch" value="results → messages">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="2411" y="1037" />
+              <mxPoint x="2411" y="1026" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
     </mxGraphModel>
   </diagram>
 </mxfile>
