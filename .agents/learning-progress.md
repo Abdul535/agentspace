@@ -4,7 +4,7 @@ How the project owner is learning the codebase, one row per activity. The rules
 are in `AGENTS.md`: predict before each step, explain it back after, a quiz before
 each commit, and a debugging session offered after every second commit.
 
-**Commits since the last debugging offer:** 2 (started counting 2026-11-18)
+**Commits since the last debugging offer:** 0 (started counting 2026-11-18)
 
 ## Log
 
