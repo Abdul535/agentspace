@@ -159,3 +159,24 @@ def test_running_bash_streams_tool_execution_updates_over_sse(tmp_path: Path, fa
     assert updates[0]["partial"]["content"][0]["text"].startswith("one")
     # Live updates are streamed, never saved: the transcript only has the final result.
     assert [m["role"] for m in saved] == ["user", "assistant", "tool_result", "assistant"]
+
+
+def test_a_model_switch_leaves_a_notice_the_model_never_sees(client: TestClient, fake: FakeProvider) -> None:
+    session_id = client.post("/sessions", json={"model": "old/model"}).json()["id"]
+    url = f"/sessions/{session_id}"
+    fake.replies = [text_reply("Hi.")]
+    client.post(f"{url}/messages", json={"content": "hi"})
+
+    client.patch(url, json={"model": "new/model"})
+    client.patch(url, json={"model": "new/model"})  # not a switch: no second notice
+    detail = client.get(url).json()
+    assert [m["role"] for m in detail["messages"]] == ["user", "assistant", "notice"]
+    assert detail["messages"][-1]["text"] == "Switched model from old/model to new/model"
+    # A notice is no reply owed: the agent already answered.
+    assert detail["can_continue"] is False
+
+    fake.replies = [text_reply("Still here.")]
+    client.post(f"{url}/messages", json={"content": "again"})
+    assert [m.role for m in fake.contexts[-1].messages] == ["user", "assistant", "user"]
+    roles = [m["role"] for m in client.get(url).json()["messages"]]
+    assert roles == ["user", "assistant", "notice", "user", "assistant"]

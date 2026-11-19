@@ -3,7 +3,8 @@
 ADR-003 step 7: `before_tool_call` can block a call, `after_tool_call` can rewrite
 its result. Step 12: `finish_turn` can end the run or ask for one more turn.
 Step 14: `get_steering_messages` / `get_follow_up_messages` feed messages the user
-queued while the run was going.
+queued while the run was going. Step 16: `convert_to_llm` turns the transcript into
+what the model reads (ADR-008).
 All are optional and async; leaving one out means "no change".
 """
 
@@ -13,6 +14,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from agentspace.agent.messages import AgentMessage, convert_to_llm
 from agentspace.agent.tool import ExecutionMode
 from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage
 
@@ -70,7 +72,7 @@ class FinishTurnContext:
     message: AssistantMessage
     """The model's reply this turn."""
     tool_results: list[ToolResultMessage]
-    new_messages: list[Message]
+    new_messages: list[AgentMessage]
     """Everything this run has added so far, starting with the prompt."""
 
 
@@ -84,7 +86,11 @@ type BeforeToolCall = Callable[[BeforeToolCallContext], Awaitable[BeforeToolCall
 type AfterToolCall = Callable[[AfterToolCallContext], Awaitable[AfterToolCallResult | None]]
 type FinishTurn = Callable[[FinishTurnContext], Awaitable[TurnDecision | None]]
 # Hands over queued messages (possibly none); the loop calls it at fixed points, like pi's `getSteeringMessages`.
-type GetMessages = Callable[[], Awaitable[list[Message]]]
+type GetMessages = Callable[[], Awaitable[list[AgentMessage]]]
+
+# The transcript as the app keeps it in, the messages the model gets out.
+# TS: type ConvertToLlm = (messages: AgentMessage[]) => Message[]
+type ConvertToLlm = Callable[[list[AgentMessage]], list[Message]]
 
 
 @dataclass(frozen=True)
@@ -105,3 +111,6 @@ class LoopConfig:
     """Polled when the run starts and after each turn; what it returns goes in before the next model call."""
     get_follow_up_messages: GetMessages | None = None
     """Polled once the run would otherwise stop; anything it returns starts another turn."""
+    convert_to_llm: ConvertToLlm = convert_to_llm
+    """Turns the transcript into the messages the model gets, before every model call. Plain, not async;
+    raising fails the run (ADR-008). The default drops the app's own messages."""

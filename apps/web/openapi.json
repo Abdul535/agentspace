@@ -118,7 +118,7 @@
           "sessions"
         ],
         "summary": "Update Session",
-        "description": "Switch the session's model; the next run uses it. 409 while a run is in progress.",
+        "description": "Switch the session's model; the next run uses it. 409 while a run is in progress.\n\nA real switch also leaves a notice in the transcript for the reader; the model never sees it (ADR-008).",
         "operationId": "update_session_sessions__session_id__patch",
         "parameters": [
           {
@@ -554,7 +554,7 @@
           },
           "new_messages": {
             "items": {
-              "$ref": "#/components/schemas/Message"
+              "$ref": "#/components/schemas/AgentMessage"
             },
             "type": "array",
             "title": "New Messages"
@@ -614,6 +614,31 @@
             "tool_execution_update": "#/components/schemas/ToolExecutionUpdateEvent",
             "turn_end": "#/components/schemas/TurnEndEvent",
             "turn_start": "#/components/schemas/TurnStartEvent"
+          }
+        }
+      },
+      "AgentMessage": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/UserMessage"
+          },
+          {
+            "$ref": "#/components/schemas/AssistantMessage"
+          },
+          {
+            "$ref": "#/components/schemas/ToolResultMessage"
+          },
+          {
+            "$ref": "#/components/schemas/NoticeMessage"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "role",
+          "mapping": {
+            "assistant": "#/components/schemas/AssistantMessage",
+            "notice": "#/components/schemas/NoticeMessage",
+            "tool_result": "#/components/schemas/ToolResultMessage",
+            "user": "#/components/schemas/UserMessage"
           }
         }
       },
@@ -728,27 +753,6 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
-      "Message": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/UserMessage"
-          },
-          {
-            "$ref": "#/components/schemas/AssistantMessage"
-          },
-          {
-            "$ref": "#/components/schemas/ToolResultMessage"
-          }
-        ],
-        "discriminator": {
-          "propertyName": "role",
-          "mapping": {
-            "assistant": "#/components/schemas/AssistantMessage",
-            "tool_result": "#/components/schemas/ToolResultMessage",
-            "user": "#/components/schemas/UserMessage"
-          }
-        }
-      },
       "MessageEndEvent": {
         "properties": {
           "type": {
@@ -758,7 +762,7 @@
             "default": "message_end"
           },
           "message": {
-            "$ref": "#/components/schemas/Message"
+            "$ref": "#/components/schemas/AgentMessage"
           }
         },
         "type": "object",
@@ -777,7 +781,7 @@
             "default": "message_start"
           },
           "message": {
-            "$ref": "#/components/schemas/Message"
+            "$ref": "#/components/schemas/AgentMessage"
           }
         },
         "type": "object",
@@ -911,6 +915,30 @@
         "title": "ModelInfo",
         "description": "One model the picker can offer."
       },
+      "NoticeMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "const": "notice",
+            "title": "Role",
+            "default": "notice"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "title": "NoticeMessage",
+        "description": "A line in the chat for the person using it, such as a model switch; never sent to the model."
+      },
       "PromptCreate": {
         "properties": {
           "content": {
@@ -940,7 +968,7 @@
           },
           "messages": {
             "items": {
-              "$ref": "#/components/schemas/Message"
+              "$ref": "#/components/schemas/AgentMessage"
             },
             "type": "array",
             "title": "Messages"
@@ -1086,7 +1114,7 @@
           },
           "messages": {
             "items": {
-              "$ref": "#/components/schemas/Message"
+              "$ref": "#/components/schemas/AgentMessage"
             },
             "type": "array",
             "title": "Messages"

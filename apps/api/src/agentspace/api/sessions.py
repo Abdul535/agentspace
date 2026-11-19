@@ -11,9 +11,10 @@ from pydantic import BaseModel, Field
 from agentspace.agent.events import AgentEvent
 from agentspace.agent.hooks import LoopConfig
 from agentspace.agent.loop import Emit, can_continue, run_loop
+from agentspace.agent.messages import AgentMessage, NoticeMessage
 from agentspace.agent.prompt import build_system_prompt
 from agentspace.agent.tool import ToolContext
-from agentspace.ai.messages import Message, UserMessage
+from agentspace.ai.messages import UserMessage
 from agentspace.ai.providers import PROVIDERS
 from agentspace.api.deps import Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
 from agentspace.config import Settings
@@ -55,7 +56,7 @@ class SessionPublic(BaseModel):
 class SessionDetail(SessionPublic):
     """A session with its full transcript."""
 
-    messages: list[Message]
+    messages: list[AgentMessage]
     can_continue: bool
     """Whether `POST .../continue` can run: the transcript ends with the model still owing a reply."""
 
@@ -117,11 +118,19 @@ async def get_session(session: SessionRowDep, store: StoreDep, runs: RunsDep) ->
 
 @router.patch("/{session_id}")
 async def update_session(body: SessionUpdate, session: SessionRowDep, store: StoreDep, runs: RunsDep) -> SessionPublic:
-    """Switch the session's model; the next run uses it. 409 while a run is in progress."""
+    """Switch the session's model; the next run uses it. 409 while a run is in progress.
+
+    A real switch also leaves a notice in the transcript for the reader; the model never sees it (ADR-008).
+    """
     # A run reads the model once when it starts, so a switch mid-run would look applied but wasn't.
+    # It also keeps the notice from landing between a tool call and its result.
     if runs.is_running(session.id):
         raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the current run to finish before switching models.")
-    return public(await store.set_model(session, body.model), runs)
+    previous = session.model
+    if body.model != previous:
+        await store.set_model(session, body.model)
+        await store.append(session, NoticeMessage(text=f"Switched model from {previous} to {body.model}"))
+    return public(session, runs)
 
 
 def no_transform(response: Response) -> None:

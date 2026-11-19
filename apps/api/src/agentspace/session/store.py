@@ -4,12 +4,12 @@ from pydantic import TypeAdapter
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from agentspace.ai.messages import Message
+from agentspace.agent.messages import AgentMessage
 from agentspace.session.models import MessageRow, SessionRow, utcnow
 
-# Turns a stored JSON message back into the right Message class by its `role`.
+# Turns a stored JSON message back into the right message class by its `role` (app messages included, ADR-008).
 # TS: like a zod schema for a union type (z.discriminatedUnion); .validate_python() is .parse().
-message_adapter: TypeAdapter[Message] = TypeAdapter(Message)
+message_adapter: TypeAdapter[AgentMessage] = TypeAdapter(AgentMessage)
 
 
 class SessionStore:
@@ -51,15 +51,15 @@ class SessionStore:
         await self.db.commit()
         return session
 
-    async def messages(self, session_id: str) -> list[Message]:
+    async def messages(self, session_id: str) -> list[AgentMessage]:
         """A session's transcript, oldest message first."""
         result = await self.db.exec(
             select(MessageRow).where(MessageRow.session_id == session_id).order_by(col(MessageRow.seq))
         )
-        # TS: rows.map((row) => Message.parse(row.data))
+        # TS: rows.map((row) => AgentMessage.parse(row.data))
         return [message_adapter.validate_python(row.data) for row in result.all()]
 
-    async def append(self, session: SessionRow, message: Message) -> MessageRow:
+    async def append(self, session: SessionRow, message: AgentMessage) -> MessageRow:
         """Save a message after the session's last one and bump the session's `updated_at`."""
         last = (
             await self.db.exec(

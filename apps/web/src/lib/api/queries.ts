@@ -73,7 +73,11 @@ export function useSetSessionModel(id: string) {
     },
     onSuccess: (session) => {
       queryClient.setQueryData<SessionDetail>(queryKeys.session(id), (old) => old && { ...old, ...session });
-      return queryClient.invalidateQueries({ queryKey: queryKeys.sessions, exact: true });
+      // Refetched too: a switch adds a notice to the transcript, which the PATCH response doesn't carry.
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.session(id) }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions, exact: true }),
+      ]);
     },
   });
 }

@@ -23,7 +23,8 @@ from agentspace.agent.hooks import (
     LoopConfig,
     TurnDecision,
 )
-from agentspace.agent.loop import run_agent, run_loop
+from agentspace.agent.loop import can_continue, run_agent, run_loop
+from agentspace.agent.messages import AgentMessage, NoticeMessage, convert_to_llm
 from agentspace.agent.tool import OnUpdate, Tool, ToolContext, ToolResult
 from agentspace.ai.messages import (
     AssistantMessage,
@@ -906,3 +907,66 @@ async def test_continue_refuses_a_transcript_with_nothing_to_answer(tmp_path: Pa
     with pytest.raises(ValueError, match="Cannot continue"):
         await continue_run(provider, tmp_path, history)
     assert provider.contexts == []
+
+
+async def test_the_default_converter_drops_notices_and_keeps_the_rest_in_order() -> None:
+    history: list[AgentMessage] = [
+        UserMessage(content="a"),
+        NoticeMessage(text="switched"),
+        text_reply("b"),
+        NoticeMessage(text="switched back"),
+    ]
+    assert roles_and_text(convert_to_llm(history)) == ["user:a", "assistant:b"]
+
+
+async def test_the_model_gets_what_convert_to_llm_returns(tmp_path: Path) -> None:
+    seen: list[list[str]] = []
+
+    def notices_as_user_messages(messages: list[AgentMessage]) -> list[Message]:
+        """A converter that rewrites notices instead of dropping them."""
+        seen.append([m.role for m in messages])
+        return [UserMessage(content=f"[{m.text}]") if isinstance(m, NoticeMessage) else m for m in messages]
+
+    provider = FakeProvider([text_reply("ok")])
+    events = [
+        event
+        async for event in run_agent(
+            provider=provider,
+            model="m",
+            system_prompt="sys",
+            tools=[],
+            history=[NoticeMessage(text="switched")],
+            prompt=UserMessage(content="hi"),
+            ctx=ToolContext(workspace=tmp_path),
+            max_turns=1,
+            config=LoopConfig(convert_to_llm=notices_as_user_messages),
+        )
+    ]
+
+    assert seen == [["notice", "user"]]  # the converter gets the app's messages
+    assert roles_and_text(provider.contexts[0].messages) == ["user:[switched]", "user:hi"]
+    # Only the run's own messages are new: the notice stays in the history, unconverted.
+    assert [m.role for m in events[-1].new_messages] == ["user", "assistant"]
+
+
+async def test_a_failing_converter_fails_the_run_instead_of_sending_something_else(tmp_path: Path) -> None:
+    def broken(messages: list[AgentMessage]) -> list[Message]:
+        raise RuntimeError("bug in converter")
+
+    provider = FakeProvider([text_reply("never")])
+    with pytest.raises(RuntimeError, match="bug in converter"):
+        await run(provider, tmp_path, config=LoopConfig(convert_to_llm=broken))
+    assert provider.contexts == []
+
+
+@pytest.mark.parametrize(
+    ("history", "expected"),
+    [
+        ([UserMessage(content="hi"), NoticeMessage(text="switched")], True),
+        ([UserMessage(content="hi"), reply("hello"), NoticeMessage(text="switched")], False),
+        ([NoticeMessage(text="switched")], False),
+    ],
+    ids=["owed-reply", "answered", "only-a-notice"],
+)
+def test_can_continue_looks_past_notices(history: list[AgentMessage], expected: bool) -> None:
+    assert can_continue(history) is expected

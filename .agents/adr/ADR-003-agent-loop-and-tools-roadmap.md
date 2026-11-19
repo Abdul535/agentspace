@@ -208,10 +208,14 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
       and continue only starts when none is active.
 
 ### Phase 4 — Context and models
-16. [ ] **Custom message types + `convert_to_llm`.** The transcript can hold
+16. [x] **Custom message types + `convert_to_llm`.** The transcript can hold
     app-only messages (notices, bash run by the user, summaries) that are turned
     into LLM messages or dropped at the LLM-call boundary.
     *pi:* `CustomAgentMessages`, `core/messages.ts`.
+    Built per ADR-008: `AgentMessage` (`agent/messages.py`) adds `NoticeMessage`,
+    `LoopConfig.convert_to_llm` runs before every model call, and a model switch
+    saves a notice the chat shows as a divider. Other roles come with the features
+    that need them (`compaction_summary` in step 17).
 17. [ ] **`transform_context` + compaction.** When the context nears the model's
     window, summarize older messages into one summary message and keep recent turns.
     *pi:* `core/compaction/`, `prepareNextTurn`.

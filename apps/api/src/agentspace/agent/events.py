@@ -17,8 +17,9 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
+from agentspace.agent.messages import AgentMessage
 from agentspace.agent.tool import ToolResult
-from agentspace.ai.messages import AssistantMessage, Message, ToolResultMessage
+from agentspace.ai.messages import AssistantMessage, ToolResultMessage
 from agentspace.ai.provider import TextDeltaEvent, ToolCallEndEvent
 
 # Why a run stopped: the model answered, it hit max_turns, the provider failed, it was cancelled,
@@ -44,7 +45,7 @@ class MessageStartEvent(BaseModel):
     """A message began; for an assistant reply the message is still empty."""
 
     type: Literal["message_start"] = "message_start"
-    message: Message
+    message: AgentMessage
 
 
 class MessageUpdateEvent(BaseModel):
@@ -58,7 +59,7 @@ class MessageEndEvent(BaseModel):
     """A message is complete; this is the point where it gets saved."""
 
     type: Literal["message_end"] = "message_end"
-    message: Message
+    message: AgentMessage
 
 
 class ToolExecutionStartEvent(BaseModel):
@@ -100,7 +101,7 @@ class AgentEndEvent(BaseModel):
 
     type: Literal["agent_end"] = "agent_end"
     reason: EndReason
-    new_messages: list[Message]
+    new_messages: list[AgentMessage]
 
 
 # Any agent event; `type` tells them apart. This is what the API streams to clients.

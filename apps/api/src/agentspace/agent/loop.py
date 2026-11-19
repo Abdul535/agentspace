@@ -7,6 +7,8 @@ messages go in before the next model call, and follow-ups restart a run that wou
 stop (ADR-003 step 14). The run ends after a batch in which every call set
 `terminate`, or when `finish_turn` says so; `max_turns` caps it either way.
 The loop holds no storage; callers persist messages from `message_end` events.
+The transcript it works on can hold app messages; `LoopConfig.convert_to_llm` turns
+it into what the model reads before every model call (ADR-008).
 With no prompt, it continues the transcript as it is (ADR-003 step 15), like pi's
 `agentLoopContinue`: a retry after an error, a stop or a crash.
 
@@ -42,13 +44,15 @@ from agentspace.agent.events import (
 from agentspace.agent.hooks import (
     AfterToolCallContext,
     BeforeToolCallContext,
+    ConvertToLlm,
     FinishTurnContext,
     GetMessages,
     LoopConfig,
     TurnDecision,
 )
+from agentspace.agent.messages import AgentMessage, convert_to_llm
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
-from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
+from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage
 from agentspace.ai.provider import (
     Context,
     DoneEvent,
@@ -71,15 +75,16 @@ TRUNCATED_CALL = (
 type Emit = Callable[[AgentEvent], Awaitable[None]]
 
 
-def can_continue(history: Sequence[Message]) -> bool:
+def can_continue(history: Sequence[AgentMessage], convert: ConvertToLlm = convert_to_llm) -> bool:
     """Whether the model can be asked to reply to this transcript with no new message.
 
     It can if what the model would see ends in a user message or a tool result: it still
     owes a reply. Not if it ends in an assistant message: the model would answer itself.
-    Checked on the transcript as sent (`prepare_transcript`), where a failed reply is
-    dropped and a tool call cut off before its result gets an error result.
+    Checked on the transcript as sent: converted (so app messages such as notices don't
+    count), then `prepare_transcript` (a failed reply is dropped, a tool call cut off
+    before its result gets an error result).
     """
-    sent = prepare_transcript(list(history))
+    sent = prepare_transcript(convert(list(history)))
     return bool(sent) and not isinstance(sent[-1], AssistantMessage)
 
 
@@ -90,7 +95,7 @@ async def run_agent(
     model: str,
     system_prompt: str,
     tools: Sequence[Tool],
-    history: Sequence[Message],
+    history: Sequence[AgentMessage],
     prompt: UserMessage | None,
     ctx: ToolContext,
     max_turns: int,
@@ -137,7 +142,7 @@ async def run_loop(
     model: str,
     system_prompt: str,
     tools: Sequence[Tool],
-    history: Sequence[Message],
+    history: Sequence[AgentMessage],
     prompt: UserMessage | None,
     ctx: ToolContext,
     max_turns: int,
@@ -150,16 +155,16 @@ async def run_loop(
     With a `prompt`, the run starts by adding it. With None, it continues `history` as it is,
     which must pass `can_continue` (pi's `agentLoopContinue`).
     """
-    if prompt is None and not can_continue(history):
-        raise ValueError("Cannot continue: the transcript is empty or ends with the model's reply.")
     # TS: `or` here works like `??`: a LoopConfig is always truthy, so only None falls through.
     config = config or LoopConfig()
-    messages: list[Message] = list(history)
-    new_messages: list[Message] = []
+    if prompt is None and not can_continue(history, config.convert_to_llm):
+        raise ValueError("Cannot continue: the transcript is empty or ends with the model's reply.")
+    messages: list[AgentMessage] = list(history)
+    new_messages: list[AgentMessage] = []
     tool_specs = [tool.spec() for tool in tools]
 
     # TS: an inner function closing over `messages` and `new_messages`.
-    def add(message: Message) -> None:
+    def add(message: AgentMessage) -> None:
         """Append to the context sent to the model and to the list this run returns."""
         messages.append(message)
         new_messages.append(message)
@@ -179,7 +184,7 @@ async def run_loop(
         add(prompt)
         await emit(MessageEndEvent(message=prompt))
 
-    async def poll(get: GetMessages | None) -> list[Message]:
+    async def poll(get: GetMessages | None) -> list[AgentMessage]:
         """Queued messages from a hook, or none when the hook isn't set."""
         return await get() if get else []
 
@@ -199,7 +204,9 @@ async def run_loop(
         # Stream the model's reply, forwarding text and tool-call pieces as they arrive.
         assistant: AssistantMessage | None = None
         await emit(MessageStartEvent(message=AssistantMessage(provider=provider.name, model=model)))
-        context = Context(system_prompt=system_prompt, messages=messages, tools=tool_specs, max_tokens=max_tokens)
+        # The model gets the transcript converted: the app's own messages are dropped or rewritten here.
+        llm_messages = config.convert_to_llm(list(messages))
+        context = Context(system_prompt=system_prompt, messages=llm_messages, tools=tool_specs, max_tokens=max_tokens)
         # TS: for await (const event of provider.stream(...)), then a switch on the event's class.
         async for event in provider.stream(model, context):
             match event:

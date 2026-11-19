@@ -8,7 +8,9 @@ export const api = createClient<paths>({ baseUrl: "/api" });
 type Schemas = components["schemas"];
 export type Session = Schemas["SessionPublic"];
 export type SessionDetail = Schemas["SessionDetail"];
-export type Message = Schemas["Message"];
+// A transcript message: the three the model reads plus the app's own, such as notices (ADR-008).
+export type Message = Schemas["AgentMessage"];
+export type NoticeMessage = Schemas["NoticeMessage"];
 export type UserMessage = Schemas["UserMessage"];
 export type AssistantMessage = Schemas["AssistantMessage"];
 export type ToolResultMessage = Schemas["ToolResultMessage"];

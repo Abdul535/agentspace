@@ -4,7 +4,7 @@ How the project owner is learning the codebase, one row per activity. The rules
 are in `AGENTS.md`: predict before each step, explain it back after, a quiz before
 each commit, and a debugging session offered after every second commit.
 
-**Commits since the last debugging offer:** 0 (offered 2026-11-19 with step 15)
+**Commits since the last debugging offer:** 1 (offered 2026-11-19 with step 15)
 
 ## Log
 
@@ -33,3 +33,7 @@ each commit, and a debugging session offered after every second commit.
 | 2026-11-19 | ADR-003 step 15: continue | Explain-back | Skipped (went straight to "commit and push") | |
 | 2026-11-19 | ADR-003 step 15: continue | Quiz | 1/3 answered right, 1 skipped | Q1 skipped: `can_continue` on a transcript ending in a failed reply (True: `prepare_transcript` drops it). Q2: a 422 from a dependency never starts the run; `claim_run`'s `finally` → `release` frees the slot. Q4 (step 14 gap, still open): after the last empty follow-up poll `accepting` is False, so steer gets a 409, not a conversion |
 | 2026-11-19 | After 2 commits | Debugging offer | Offered with step 15 | |
+| 2026-11-20 | ADR-003 step 16: custom messages + `convert_to_llm` | Prediction | No idea; walked through pi's `convertToLlm` (`coding-agent/src/core/messages.ts`) | Two transcripts: what is saved vs what the model gets; translate-or-drop happens right before each model call, not at save time |
+| 2026-11-19 | After 2 commits | Debugging offer | Not taken up (moved on to step 16) | |
+| 2026-11-20 | ADR-003 step 16: app messages + `convert_to_llm` (ADR-008) | Explain-back | Skipped (went straight to "commit it") | |
+| 2026-11-20 | ADR-003 step 16: app messages + `convert_to_llm` (ADR-008) | Quiz | 2/3 | Q3: a converter that raises is not caught; the exception ends the run before `provider.stream` (`loop.py:208`), nothing is sent. No fallback |

@@ -11,7 +11,7 @@ import type { AssistantMessage, Message, ToolResultMessage } from "@/lib/api/cli
 // Shiki highlighting for fenced code; defined once so Streamdown's memo isn't broken by a new object each render.
 const plugins = { code };
 
-/** The transcript: user prompts, assistant replies with their tool calls inline. Tool results render inside their call. */
+/** The transcript: user prompts, assistant replies with their tool calls inline, and notices as dividers. Tool results render inside their call. */
 export function MessageList({
   messages,
   draft,
@@ -52,6 +52,9 @@ export function MessageList({
             />
           );
         }
+        if (message.role === "notice") {
+          return <Notice key={index} text={message.text} />;
+        }
         return null;
       })}
       {draft !== null && (
@@ -59,6 +62,17 @@ export function MessageList({
           {draft}
         </Streamdown>
       )}
+    </div>
+  );
+}
+
+// A line for the reader, such as a model switch; the model never sees it.
+function Notice({ text }: { text: string }) {
+  return (
+    <div role="note" className="flex items-center gap-3 text-xs text-muted-foreground">
+      <div className="h-px flex-1 bg-border" />
+      <span className="text-balance text-center">{text}</span>
+      <div className="h-px flex-1 bg-border" />
     </div>
   );
 }

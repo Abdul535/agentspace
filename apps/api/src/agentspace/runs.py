@@ -31,7 +31,8 @@ from agentspace.agent.events import (
     ToolExecutionStartEvent,
 )
 from agentspace.agent.loop import Emit
-from agentspace.ai.messages import AssistantMessage, Message, TextContent, UserMessage
+from agentspace.agent.messages import AgentMessage
+from agentspace.ai.messages import AssistantMessage, TextContent, UserMessage
 from agentspace.ai.provider import TextDeltaEvent, ToolCallEndEvent
 from agentspace.session.store import SessionStore
 
@@ -46,7 +47,7 @@ class RunSnapshot(BaseModel):
 
     type: Literal["run_snapshot"] = "run_snapshot"
     running: bool
-    messages: list[Message]
+    messages: list[AgentMessage]
     """The whole transcript so far, saved messages included."""
     streaming: AssistantMessage | None = None
     """The assistant reply being written right now, as far as it got."""
@@ -74,10 +75,10 @@ class MessageQueue:
         self.mode: QueueMode = mode
         self.messages: list[UserMessage] = []
 
-    def drain(self) -> list[Message]:
+    def drain(self) -> list[AgentMessage]:
         """Take what this poll delivers, oldest first."""
         count = len(self.messages) if self.mode == "all" else min(1, len(self.messages))
-        taken: list[Message] = list(self.messages[:count])
+        taken: list[AgentMessage] = list(self.messages[:count])
         del self.messages[:count]  # TS: this.messages.splice(0, count)
         return taken
 
@@ -92,7 +93,7 @@ class ActiveRun:
     """One session's run: its task, the live state a late subscriber needs, and its subscribers."""
 
     session_id: str
-    messages: list[Message]
+    messages: list[AgentMessage]
     """History at start plus every message the run has finished."""
     history_size: int
     # TS: `field(default_factory=...)` gives each instance a fresh value; a plain `= set()` would be shared.
@@ -114,11 +115,11 @@ class ActiveRun:
         (self.steering if kind == "steer" else self.follow_ups).messages.append(message)
         return True
 
-    async def take_steering(self) -> list[Message]:
+    async def take_steering(self) -> list[AgentMessage]:
         """`LoopConfig.get_steering_messages` for this run."""
         return self.steering.drain()
 
-    async def take_follow_ups(self) -> list[Message]:
+    async def take_follow_ups(self) -> list[AgentMessage]:
         """`LoopConfig.get_follow_up_messages` for this run."""
         taken = self.follow_ups.drain()
         # The loop polls follow-ups only after an empty steering poll, and ends when this is empty too.
@@ -221,7 +222,7 @@ class RunManager:
         """Whether the session has a run (claimed or started)."""
         return session_id in self.runs
 
-    async def claim(self, session_id: str, load_history: Callable[[], Awaitable[list[Message]]]) -> ActiveRun:
+    async def claim(self, session_id: str, load_history: Callable[[], Awaitable[list[AgentMessage]]]) -> ActiveRun:
         """Take the session's run slot and load its history; raises `SessionBusyError` if it's taken."""
         # TS: `async with lock` is acquire + try/finally release, like `await using`.
         async with self.claim_lock:

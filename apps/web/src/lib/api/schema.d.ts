@@ -48,6 +48,8 @@ export interface paths {
         /**
          * Update Session
          * @description Switch the session's model; the next run uses it. 409 while a run is in progress.
+         *
+         *     A real switch also leaves a notice in the transcript for the reader; the model never sees it (ADR-008).
          */
         patch: operations["update_session_sessions__session_id__patch"];
         trace?: never;
@@ -217,9 +219,10 @@ export interface components {
             type: "agent_end";
             reason: components["schemas"]["EndReason"];
             /** New Messages */
-            new_messages: components["schemas"]["Message"][];
+            new_messages: components["schemas"]["AgentMessage"][];
         };
         AgentEvent: components["schemas"]["AgentStartEvent"] | components["schemas"]["TurnStartEvent"] | components["schemas"]["MessageStartEvent"] | components["schemas"]["MessageUpdateEvent"] | components["schemas"]["MessageEndEvent"] | components["schemas"]["ToolExecutionStartEvent"] | components["schemas"]["ToolExecutionUpdateEvent"] | components["schemas"]["ToolExecutionEndEvent"] | components["schemas"]["TurnEndEvent"] | components["schemas"]["AgentEndEvent"];
+        AgentMessage: components["schemas"]["UserMessage"] | components["schemas"]["AssistantMessage"] | components["schemas"]["ToolResultMessage"] | components["schemas"]["NoticeMessage"];
         /**
          * AgentStartEvent
          * @description A run started.
@@ -272,7 +275,6 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        Message: components["schemas"]["UserMessage"] | components["schemas"]["AssistantMessage"] | components["schemas"]["ToolResultMessage"];
         /**
          * MessageEndEvent
          * @description A message is complete; this is the point where it gets saved.
@@ -283,7 +285,7 @@ export interface components {
              * @enum {string}
              */
             type: "message_end";
-            message: components["schemas"]["Message"];
+            message: components["schemas"]["AgentMessage"];
         };
         /**
          * MessageStartEvent
@@ -295,7 +297,7 @@ export interface components {
              * @enum {string}
              */
             type: "message_start";
-            message: components["schemas"]["Message"];
+            message: components["schemas"]["AgentMessage"];
         };
         /**
          * MessageUpdateEvent
@@ -341,6 +343,21 @@ export interface components {
             output_price: number | null;
         };
         /**
+         * NoticeMessage
+         * @description A line in the chat for the person using it, such as a model switch; never sent to the model.
+         */
+        NoticeMessage: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            role: "notice";
+            /** Text */
+            text: string;
+            /** Timestamp */
+            timestamp?: number;
+        };
+        /**
          * PromptCreate
          * @description A new user message to run the agent on.
          */
@@ -362,7 +379,7 @@ export interface components {
             /** Running */
             running: boolean;
             /** Messages */
-            messages: components["schemas"]["Message"][];
+            messages: components["schemas"]["AgentMessage"][];
             streaming?: components["schemas"]["AssistantMessage"] | null;
             /**
              * Pending Tools
@@ -418,7 +435,7 @@ export interface components {
              */
             running: boolean;
             /** Messages */
-            messages: components["schemas"]["Message"][];
+            messages: components["schemas"]["AgentMessage"][];
             /** Can Continue */
             can_continue: boolean;
         };
