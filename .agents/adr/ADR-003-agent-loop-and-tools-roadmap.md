@@ -168,12 +168,25 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
     explicit `POST /sessions/{id}/abort` cancels it. Move the run lock into the
     database so the API can run with several workers. Needs its own ADR, because
     it supersedes ADR-001's "closing the connection cancels the run".
-14. [ ] **Steering and follow-up queues.** `steer(msg)` is added after the current
+14. [x] **Steering and follow-up queues.** `steer(msg)` is added after the current
     turn, and `follow_up(msg)` runs once the agent would otherwise stop. Each queue
     has a `QueueMode` of `all` or `one_at_a_time`. Exposed through API routes and
     the web input box. Needs step 13.
     *pi:* `getSteeringMessages`, `getFollowUpMessages`, the outer loop in `runLoop`,
     `steer`/`followUp` in `agent.ts`.
+    Built as follows:
+    - `LoopConfig.get_steering_messages` is polled at the start and after each
+      turn; what it returns goes in before the next model call, even after a final
+      answer or a terminating batch. `get_follow_up_messages` is polled only when
+      the run would stop. Both stay under `max_turns`.
+    - The queues live on `ActiveRun` (`runs.py`): a `MessageQueue` per kind,
+      `one_at_a_time` by default, like pi. Modes aren't exposed in the API yet.
+    - `POST /sessions/{id}/steer` and `/follow-up` return 202, or 409 when no run
+      will pick the message up. The run stops accepting after its last, empty
+      follow-up poll, so a message is never accepted and then silently dropped.
+    - A run that ends early (max turns, error, stop) leaves its queue unsent; the
+      web client puts those messages back in the input box. Enter steers while a
+      run is going, Alt+Enter queues a follow-up.
 15. [ ] **Continue.** Resume from a transcript that ends in a user or tool-result
     message without a new prompt, for retry after an error.
     *pi:* `agentLoopContinue`.

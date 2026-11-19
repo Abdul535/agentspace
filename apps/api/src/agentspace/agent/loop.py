@@ -2,9 +2,10 @@
 
 A simplified port of pi's `runLoop` (`packages/agent/src/agent-loop.ts`): a
 reply's tool calls run in parallel or one at a time (`LoopConfig.tool_execution`),
-each through prepare, execute and finalize with the `LoopConfig` hooks, and there
-are no steering/follow-up queues yet. The run ends after a batch in which every
-call set `terminate`, or when `finish_turn` says so; `max_turns` caps it either way.
+each through prepare, execute and finalize with the `LoopConfig` hooks. Steering
+messages go in before the next model call, and follow-ups restart a run that would
+stop (ADR-003 step 14). The run ends after a batch in which every call set
+`terminate`, or when `finish_turn` says so; `max_turns` caps it either way.
 The loop holds no storage; callers persist messages from `message_end` events.
 
 `run_loop` reports events through an `emit` callback, so any code holding it can
@@ -40,6 +41,7 @@ from agentspace.agent.hooks import (
     AfterToolCallContext,
     BeforeToolCallContext,
     FinishTurnContext,
+    GetMessages,
     LoopConfig,
     TurnDecision,
 )
@@ -148,9 +150,22 @@ async def run_loop(
     add(prompt)
     await emit(MessageEndEvent(message=prompt))
 
+    async def poll(get: GetMessages | None) -> list[Message]:
+        """Queued messages from a hook, or none when the hook isn't set."""
+        return await get() if get else []
+
+    # Steering the user typed before the run got going goes in with the first turn, like pi.
+    pending = await poll(config.get_steering_messages)
     reason: EndReason = "max_turns"
     for turn in range(1, max_turns + 1):  # TS: for (let turn = 1; turn <= maxTurns; turn++)
         await emit(TurnStartEvent(turn=turn))
+
+        # Queued messages join the context before the model is asked again.
+        for message in pending:
+            await emit(MessageStartEvent(message=message))
+            add(message)
+            await emit(MessageEndEvent(message=message))
+        pending = []
 
         # Stream the model's reply, forwarding text and tool-call pieces as they arrive.
         assistant: AssistantMessage | None = None
@@ -192,18 +207,22 @@ async def run_loop(
         if decision == "end":
             reason = "finish_turn"
             break
+        # Messages steered in during this turn always get a reply, whatever the tool calls did.
+        pending = await poll(config.get_steering_messages)
         # One more turn on the same context, even after a final answer or a terminating batch.
-        if decision == "continue":
+        if pending or decision == "continue":
             continue
-        # A reply without tool calls is the final answer.
-        if not calls:
-            reason = "done"
-            break
-        # Stop only if every call asked to, like pi's `shouldTerminateToolBatch`: any other result still needs a reply.
+        # Go on while the model calls tools, unless every call asked to stop (pi's `shouldTerminateToolBatch`).
         # TS: all(...) is results.every(...)
-        if all(f.terminate for f in finished):
-            reason = "terminated"
-            break
+        if calls and not all(f.terminate for f in finished):
+            continue
+        # The run would stop here; follow-ups queued for this moment start another turn.
+        pending = await poll(config.get_follow_up_messages)
+        if pending:
+            continue
+        # No tool calls means a final answer; otherwise every call asked to stop.
+        reason = "terminated" if calls else "done"
+        break
 
     await emit(AgentEndEvent(reason=reason, new_messages=new_messages))
 

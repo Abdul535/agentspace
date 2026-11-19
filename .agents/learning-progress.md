@@ -4,7 +4,7 @@ How the project owner is learning the codebase, one row per activity. The rules
 are in `AGENTS.md`: predict before each step, explain it back after, a quiz before
 each commit, and a debugging session offered after every second commit.
 
-**Commits since the last debugging offer:** 2 (started counting 2026-11-18)
+**Commits since the last debugging offer:** 1 (started counting 2026-11-18)
 
 ## Log
 
@@ -26,3 +26,6 @@ each commit, and a debugging session offered after every second commit.
 | 2026-11-19 | More reference designs, architectures diagram, ADR-003 accepted | Quiz | 4/4 | |
 | 2026-11-19 | ADR-003 step 13: background runs | Prediction | Right core idea: server owns the run, client re-subscribes. Proposed Redis for state | Missed the catch-up gap (events between disconnect and resubscribe); state that SQLite already holds the transcript; Redis not needed for one process |
 | 2026-11-19 | ADR-003 step 13: background runs (ADR-007) | Explain-back, quiz | Skipped at the owner's request ("commit and don't ask anything") | Background runs untested by quiz: `RunManager.claim` lock, done-callback vs `finally`, snapshot + subscribe with no `await` between |
+| 2026-11-19 | After 2 commits | Debugging offer | Offered with step 14 | |
+| 2026-11-19 | ADR-003 step 14: steering and follow-up queues | Prediction | Skipped ("go for step 14"); debugging offer not taken up | Where queued messages enter the loop; steering vs follow-up timing; `one_at_a_time` vs `all` |
+| 2026-11-19 | ADR-003 step 14: steering and follow-up queues | Explain-back, quiz | Skipped at the owner's request ("commit and don't ask anything") | Loop poll order (steering before follow-ups), `accepting` flag in `take_follow_ups`, why the web lists a queued message before the request |

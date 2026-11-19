@@ -749,3 +749,90 @@ async def test_finish_turn_cannot_keep_a_failed_run_going(tmp_path: Path) -> Non
 
     assert turns == [1]
     assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "error"
+
+
+class Queued:
+    """A steering or follow-up hook that hands out the given batches, one per poll, then nothing."""
+
+    def __init__(self, *batches: list[str]) -> None:
+        self.batches = [[UserMessage(content=text) for text in batch] for batch in batches]
+        self.polls = 0
+
+    async def __call__(self) -> list[Message]:
+        self.polls += 1
+        return list(self.batches.pop(0)) if self.batches else []
+
+
+def roles_and_text(messages: list[Message]) -> list[str]:
+    """Each message as `role:text`, for comparing transcripts at a glance."""
+    out = []
+    for m in messages:
+        text = m.content if isinstance(m, UserMessage) else "".join(getattr(b, "text", "") for b in m.content)
+        out.append(f"{m.role}:{text}")
+    return out
+
+
+async def test_steering_goes_in_after_the_current_turn_before_the_next_model_call(tmp_path: Path) -> None:
+    # The first poll is at the start of the run; the second, after turn 1, has the user's message.
+    steering = Queued([], ["use TypeScript"])
+    provider = FakeProvider([tool_reply(call("echo", text="a")), text_reply("ok, TypeScript")])
+    events = await run(provider, tmp_path, tools=[EchoTool()], config=LoopConfig(get_steering_messages=steering))
+
+    assert roles_and_text(ended(events)) == [
+        "user:go",
+        "assistant:",
+        "tool_result:a",
+        "user:use TypeScript",
+        "assistant:ok, TypeScript",
+    ]
+    # The model saw the steering message on its second call.
+    assert roles_and_text(provider.contexts[1].messages)[-1] == "user:use TypeScript"
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"
+
+
+async def test_steering_queued_before_the_first_turn_goes_in_with_the_prompt(tmp_path: Path) -> None:
+    provider = FakeProvider([text_reply("both")])
+    config = LoopConfig(get_steering_messages=Queued(["and be brief"]))
+    events = await run(provider, tmp_path, tools=[], config=config)
+
+    assert roles_and_text(ended(events)) == ["user:go", "user:and be brief", "assistant:both"]
+    assert len(provider.contexts) == 1
+
+
+async def test_steering_after_a_final_answer_or_a_terminating_batch_gets_a_reply(tmp_path: Path) -> None:
+    for first in (text_reply("done"), tool_reply(call("stop", text="a"))):
+        provider = FakeProvider([first, text_reply("answered")])
+        config = LoopConfig(get_steering_messages=Queued([], ["one more thing"]))
+        events = await run(provider, tmp_path, tools=[StopTool()], config=config)
+
+        assert len(provider.contexts) == 2 and ended(events)[-1].content[0].text == "answered"
+
+
+async def test_follow_ups_are_polled_only_when_the_run_would_stop(tmp_path: Path) -> None:
+    follow_ups = Queued(["now the tests"])
+    provider = FakeProvider([tool_reply(call("echo", text="a")), text_reply("code done"), text_reply("tests done")])
+    events = await run(provider, tmp_path, tools=[EchoTool()], config=LoopConfig(get_follow_up_messages=follow_ups))
+
+    assert roles_and_text(ended(events))[-3:] == ["assistant:code done", "user:now the tests", "assistant:tests done"]
+    # Not after turn 1 (the model was still calling tools): after "code done", and after "tests done".
+    assert follow_ups.polls == 2
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"
+
+
+async def test_steering_wins_over_follow_ups(tmp_path: Path) -> None:
+    steering, follow_ups = Queued([], ["steer"]), Queued(["follow"])
+    provider = FakeProvider([text_reply("1"), text_reply("2"), text_reply("3")])
+    config = LoopConfig(get_steering_messages=steering, get_follow_up_messages=follow_ups)
+    events = await run(provider, tmp_path, tools=[], config=config)
+
+    texts = roles_and_text(ended(events))
+    assert texts == ["user:go", "assistant:1", "user:steer", "assistant:2", "user:follow", "assistant:3"]
+
+
+async def test_max_turns_caps_a_run_that_keeps_getting_steered(tmp_path: Path) -> None:
+    steering = Queued(*[["again"]] * 10)
+    provider = FakeProvider([text_reply("hi") for _ in range(5)])
+    events = await run(provider, tmp_path, max_turns=3, tools=[], config=LoopConfig(get_steering_messages=steering))
+
+    assert len(provider.contexts) == 3
+    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "max_turns"

@@ -5,6 +5,9 @@ the listening, not the run. A client that (re)connects gets a `RunSnapshot`
 (transcript so far + the reply being written), then live events, like pi's
 `agent.state` followed by `agent.subscribe()`. Runs live in this process's
 memory, so the API runs as one worker.
+
+While a run is going, the user can queue messages (ADR-003 step 14): steering goes
+in after the current turn, follow-ups once the run would otherwise stop.
 """
 
 import asyncio
@@ -28,7 +31,7 @@ from agentspace.agent.events import (
     ToolExecutionStartEvent,
 )
 from agentspace.agent.loop import Emit
-from agentspace.ai.messages import AssistantMessage, Message, TextContent
+from agentspace.ai.messages import AssistantMessage, Message, TextContent, UserMessage
 from agentspace.ai.provider import TextDeltaEvent, ToolCallEndEvent
 from agentspace.session.store import SessionStore
 
@@ -59,6 +62,26 @@ type Subscriber = asyncio.Queue[AgentEvent | None]
 type LoopFn = Callable[[Emit], Awaitable[None]]
 
 
+# How many queued messages one poll hands over: all of them, or the oldest one (pi's default).
+type QueueMode = Literal["all", "one_at_a_time"]
+type QueueKind = Literal["steer", "follow_up"]
+
+
+class MessageQueue:
+    """Messages waiting for the loop to pick them up, after pi's `PendingMessageQueue`."""
+
+    def __init__(self, mode: QueueMode = "one_at_a_time") -> None:
+        self.mode: QueueMode = mode
+        self.messages: list[UserMessage] = []
+
+    def drain(self) -> list[Message]:
+        """Take what this poll delivers, oldest first."""
+        count = len(self.messages) if self.mode == "all" else min(1, len(self.messages))
+        taken: list[Message] = list(self.messages[:count])
+        del self.messages[:count]  # TS: this.messages.splice(0, count)
+        return taken
+
+
 class SessionBusyError(Exception):
     """The session already has a run."""
 
@@ -79,6 +102,30 @@ class ActiveRun:
     task: asyncio.Task[None] | None = None
     ended: bool = False
     """Whether subscribers already got an `agent_end`."""
+    steering: MessageQueue = field(default_factory=MessageQueue)
+    follow_ups: MessageQueue = field(default_factory=MessageQueue)
+    accepting: bool = True
+    """Whether queued messages can still reach the model; False once the run has made its last poll."""
+
+    def queue(self, kind: QueueKind, message: UserMessage) -> bool:
+        """Queue a message for the loop; False if the run will never pick it up."""
+        if not self.accepting:
+            return False
+        (self.steering if kind == "steer" else self.follow_ups).messages.append(message)
+        return True
+
+    async def take_steering(self) -> list[Message]:
+        """`LoopConfig.get_steering_messages` for this run."""
+        return self.steering.drain()
+
+    async def take_follow_ups(self) -> list[Message]:
+        """`LoopConfig.get_follow_up_messages` for this run."""
+        taken = self.follow_ups.drain()
+        # The loop polls follow-ups only after an empty steering poll, and ends when this is empty too.
+        # Neither poll awaits anything, so no message can slip in between: from here, refuse new ones.
+        if not taken:
+            self.accepting = False
+        return taken
 
     def snapshot(self) -> RunSnapshot:
         """The run's state now; copied, because the run keeps changing it after this returns."""
@@ -222,6 +269,8 @@ class RunManager:
 
     def finish(self, run: ActiveRun, task: asyncio.Task[None]) -> None:
         """Free the slot and end every subscriber's stream, with a closing `agent_end` if the loop didn't send one."""
+        # A run that ended early (max_turns, error, abort) leaves queued messages unsent; the client still has them.
+        run.accepting = False
         if self.runs.get(run.session_id) is run:
             del self.runs[run.session_id]
         if not run.ended:

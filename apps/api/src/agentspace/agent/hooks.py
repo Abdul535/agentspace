@@ -2,6 +2,8 @@
 
 ADR-003 step 7: `before_tool_call` can block a call, `after_tool_call` can rewrite
 its result. Step 12: `finish_turn` can end the run or ask for one more turn.
+Step 14: `get_steering_messages` / `get_follow_up_messages` feed messages the user
+queued while the run was going.
 All are optional and async; leaving one out means "no change".
 """
 
@@ -81,6 +83,8 @@ type TurnDecision = Literal["end", "continue"]
 type BeforeToolCall = Callable[[BeforeToolCallContext], Awaitable[BeforeToolCallResult | None]]
 type AfterToolCall = Callable[[AfterToolCallContext], Awaitable[AfterToolCallResult | None]]
 type FinishTurn = Callable[[FinishTurnContext], Awaitable[TurnDecision | None]]
+# Hands over queued messages (possibly none); the loop calls it at fixed points, like pi's `getSteeringMessages`.
+type GetMessages = Callable[[], Awaitable[list[Message]]]
 
 
 @dataclass(frozen=True)
@@ -97,3 +101,7 @@ class LoopConfig:
     finish_turn: FinishTurn | None = None
     """Runs after each turn, before `turn_end`. Ignored after a provider error or abort, which always end the run.
     Raising ends the run with that error, like any other loop failure."""
+    get_steering_messages: GetMessages | None = None
+    """Polled when the run starts and after each turn; what it returns goes in before the next model call."""
+    get_follow_up_messages: GetMessages | None = None
+    """Polled once the run would otherwise stop; anything it returns starts another turn."""

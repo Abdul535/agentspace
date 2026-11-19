@@ -1,4 +1,4 @@
-"""HTTP routes for sessions: create, list, read, switch model, send a prompt, watch or stop its run."""
+"""HTTP routes for sessions: create, list, read, switch model, send a prompt, watch, steer or stop its run."""
 
 from collections.abc import AsyncIterable
 from datetime import datetime
@@ -8,13 +8,14 @@ from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 
 from agentspace.agent.events import AgentEvent
+from agentspace.agent.hooks import LoopConfig
 from agentspace.agent.loop import Emit, run_loop
 from agentspace.agent.prompt import build_system_prompt
 from agentspace.agent.tool import ToolContext
 from agentspace.ai.messages import Message, UserMessage
 from agentspace.ai.providers import PROVIDERS
 from agentspace.api.deps import RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
-from agentspace.runs import RunManager, RunSnapshot, read_events
+from agentspace.runs import QueueKind, RunManager, RunSnapshot, read_events
 from agentspace.session.models import SessionRow
 from agentspace.tools import TOOL_SETS, ToolSetName, build_tools
 
@@ -160,6 +161,11 @@ async def send_message(
             ctx=ToolContext(workspace=run.workspace),
             max_turns=settings.max_turns,
             max_tokens=settings.max_output_tokens,
+            # Messages the user queues during the run (`POST .../steer`, `.../follow-up`).
+            config=LoopConfig(
+                get_steering_messages=run.active.take_steering,
+                get_follow_up_messages=run.active.take_follow_ups,
+            ),
             emit=emit,
         )
 
@@ -186,6 +192,27 @@ async def watch_session(
     yield snapshot
     async for event in read_events(active, queue):
         yield event
+
+
+def queue_message(session: SessionRow, runs: RunManager, kind: QueueKind, content: str) -> None:
+    """Queue a user message on the session's run, or 409 if no run will pick it up."""
+    active = runs.get(session.id)
+    if active is None or not active.queue(kind, UserMessage(content=content)):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "This session has no run that can take it; send it as a new prompt."
+        )
+
+
+@router.post("/{session_id}/steer", status_code=status.HTTP_202_ACCEPTED)
+async def steer_run(body: PromptCreate, session: SessionRowDep, runs: RunsDep) -> None:
+    """Queue a message for the model to see after the current turn; it shows up as a `message_end` when it does."""
+    queue_message(session, runs, "steer", body.content)
+
+
+@router.post("/{session_id}/follow-up", status_code=status.HTTP_202_ACCEPTED)
+async def follow_up_run(body: PromptCreate, session: SessionRowDep, runs: RunsDep) -> None:
+    """Queue a message for when the run would otherwise stop; the run then goes on with it."""
+    queue_message(session, runs, "follow_up", body.content)
 
 
 @router.post("/{session_id}/abort", status_code=status.HTTP_204_NO_CONTENT)

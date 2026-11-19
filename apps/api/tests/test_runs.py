@@ -18,7 +18,7 @@ from agentspace.ai.provider import AssistantEvent, Context, DoneEvent, StartEven
 from agentspace.api.deps import provider_lookup
 from agentspace.config import Settings
 from agentspace.main import create_app
-from agentspace.runs import ActiveRun, RunManager, read_events
+from agentspace.runs import ActiveRun, MessageQueue, RunManager, read_events
 
 
 class GatedProvider:
@@ -208,3 +208,44 @@ def test_a_subscriber_that_falls_behind_is_dropped_without_holding_the_run_back(
     while not slow.empty():
         drained.append(slow.get_nowait())
     assert drained[-1] is None
+
+
+def test_a_message_steered_in_mid_run_gets_its_own_reply(client: TestClient, provider: GatedProvider) -> None:
+    session_id = client.post("/sessions", json={}).json()["id"]
+    assert client.post(f"/sessions/{session_id}/steer", json={"content": "x"}).status_code == 409  # nothing running
+
+    post = in_background(lambda: client.post(f"/sessions/{session_id}/messages", json={"content": "hi"}))
+    assert provider.waiting.wait(5)
+    assert client.post(f"/sessions/{session_id}/steer", json={"content": "shorter please"}).status_code == 202
+    client.portal.call(provider.gate.set)
+    post["thread"].join(5)
+
+    events = sse_events(post["result"].text)
+    assert events[-1]["reason"] == "done"
+    saved = client.get(f"/sessions/{session_id}").json()["messages"]
+    assert [(m["role"], m["content"] if m["role"] == "user" else "…") for m in saved] == [
+        ("user", "hi"),
+        ("assistant", "…"),
+        ("user", "shorter please"),
+        ("assistant", "…"),
+    ]
+
+
+def test_queues_hand_over_one_message_or_all_of_them() -> None:
+    one, everything = MessageQueue(), MessageQueue("all")
+    for queue in (one, everything):
+        queue.messages = [UserMessage(content="a"), UserMessage(content="b")]
+
+    assert [m.content for m in one.drain()] == ["a"] and [m.content for m in one.drain()] == ["b"]
+    assert [m.content for m in everything.drain()] == ["a", "b"] and everything.drain() == []
+
+
+def test_after_the_last_empty_follow_up_poll_the_run_refuses_new_messages() -> None:
+    run = ActiveRun(session_id="s", messages=[], history_size=0)
+    assert run.queue("follow_up", UserMessage(content="a"))
+    assert asyncio.run(run.take_follow_ups()) != []
+    assert run.accepting  # the run goes on with "a"
+
+    assert asyncio.run(run.take_follow_ups()) == []
+    # The loop is about to end, so a message queued now would never be sent: it gets a 409 instead.
+    assert not run.queue("steer", UserMessage(content="too late"))

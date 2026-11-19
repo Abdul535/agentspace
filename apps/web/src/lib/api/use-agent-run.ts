@@ -3,9 +3,15 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
-import { api, type Message } from "./client";
+import { api, errorMessage, type Message } from "./client";
 import { queryKeys } from "./queries";
 import { type RunStreamEvent, streamPrompt, watchRun } from "./stream";
+
+/** Where a message typed during a run goes: after the current turn, or once the run would stop. */
+export type QueueKind = "steer" | "follow_up";
+
+/** A message queued on the running agent that it hasn't picked up yet. */
+export type QueuedMessage = { kind: QueueKind; content: string };
 
 type RunState = {
   running: boolean;
@@ -71,10 +77,14 @@ function reduce(s: RunState, event: RunStreamEvent): RunState {
  *
  * The server owns runs (ADR-007): leaving the page only stops listening, and
  * `serverRunning` (from the fetched session) reattaches to a run already going.
+ * Messages queued during the run that it never picked up go back through `onUnsent`.
  */
-export function useAgentRun(sessionId: string, serverRunning: boolean) {
+export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent: (texts: string[]) => void) {
   const queryClient = useQueryClient();
   const [state, setState] = useState<RunState>(idle);
+  // A ref as well as state: `listen` reads the latest list when the run ends, after many renders.
+  const queuedRef = useRef<QueuedMessage[]>([]);
+  const [queued, setQueued] = useState<QueuedMessage[]>([]);
   // The connection this hook is listening on; null when not listening.
   const controller = useRef<AbortController | null>(null);
 
@@ -88,6 +98,12 @@ export function useAgentRun(sessionId: string, serverRunning: boolean) {
     let error: string | null = null;
     try {
       for await (const event of open(abort.signal)) {
+        // A queued message the agent picked up comes back as a user `message_end`: it's no longer queued.
+        if (event.type === "message_end" && event.message.role === "user") {
+          const content = event.message.content;
+          const index = queuedRef.current.findIndex((q) => q.content === content);
+          if (index !== -1) updateQueued(queuedRef.current.toSpliced(index, 1));
+        }
         setState((s) => reduce(s, event));
       }
     } catch (e) {
@@ -101,6 +117,9 @@ export function useAgentRun(sessionId: string, serverRunning: boolean) {
           queryClient.invalidateQueries({ queryKey: queryKeys.sessions, exact: true }),
         ]);
         setState({ ...idle, error });
+        // The run ended (max turns, error, stop) before reaching these: hand them back instead of losing them.
+        if (queuedRef.current.length > 0) onUnsent(queuedRef.current.map((q) => q.content));
+        updateQueued([]);
       }
     }
   }
@@ -127,11 +146,30 @@ export function useAgentRun(sessionId: string, serverRunning: boolean) {
     void listen((signal) => streamPrompt(sessionId, content, signal));
   }
 
+  function updateQueued(next: QueuedMessage[]) {
+    queuedRef.current = next;
+    setQueued(next);
+  }
+
+  // Queue a message on the running agent; a 409 means the run is ending and won't pick it up.
+  async function queue(kind: QueueKind, content: string) {
+    // Listed before the request: the agent may pick it up before the response arrives.
+    const item = { kind, content };
+    updateQueued([...queuedRef.current, item]);
+    const path = kind === "steer" ? "/sessions/{session_id}/steer" : "/sessions/{session_id}/follow-up";
+    const { error } = await api.POST(path, { params: { path: { session_id: sessionId } }, body: { content } });
+    if (error) {
+      updateQueued(queuedRef.current.filter((q) => q !== item));
+      onUnsent([content]);
+      setState((s) => ({ ...s, error: errorMessage(error) }));
+    }
+  }
+
   // Stop the run on the server; the stream then ends on its own with `agent_end` (reason "aborted").
   async function stop() {
     // A 409 means the run already ended, and its stream is closing anyway.
     await api.POST("/sessions/{session_id}/abort", { params: { path: { session_id: sessionId } } });
   }
 
-  return { ...state, send, stop };
+  return { ...state, queued, send, queue, stop };
 }
