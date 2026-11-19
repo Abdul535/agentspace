@@ -1,6 +1,6 @@
 # ADR-003 — Agent loop and tools roadmap: pi parity, one step at a time
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-17
 - **Deciders:** project owner
 

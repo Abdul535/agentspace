@@ -11,7 +11,7 @@ Coding-agent skills live in `.agents/skills/`, with a symlink per skill in `.cla
 
 ## Rules
 
-Build agents from scratch, with no agent framework (no LangChain, LlamaIndex, CrewAI, Agent SDKs, etc.): the agent loop, tool calling, provider adapters, skills and sessions are our own code. Use pi (MIT, upstream clone at `../pi-upstream`, from https://github.com/earendil-works/pi) as the reference design: read how it does a thing before building ours, then write our own version. Don't vendor or import pi packages. Build only what the user asks for, one step at a time.
+Build agents from scratch, with no agent framework (no LangChain, LlamaIndex, CrewAI, Agent SDKs, etc.): the agent loop, tool calling, provider adapters, skills and sessions are our own code. Use pi (MIT, upstream clone at `../pi-upstream`, from https://github.com/earendil-works/pi) and opencode (MIT, clone at `../opencode`, from https://github.com/anomalyco/opencode) and CompanyOS (Elastic License 2.0, clone at `../CompanyOS`, from https://github.com/kortix-ai/CompanyOS) and OpenMausBot (Apache 2.0, clone at `../OpenMausBot`, from https://github.com/milind-soni/OpenMausBot) as the reference designs: read how they do a thing before building ours, then write our own version. Don't vendor or import their packages. Build only what the user asks for, one step at a time.
 
 Comment the code with short one-line comments: every module, class and function gets a one-line docstring (Python) or `//` comment (TypeScript) saying what it does, and a non-obvious block gets a one-line comment before it saying why. Explain intent, not syntax; don't comment lines that already read clearly.
 
