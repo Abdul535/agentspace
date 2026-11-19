@@ -1,3 +1,4 @@
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
@@ -7,7 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agentspace.ai.catalog import CatalogError, OpenRouterCatalog
+from agentspace.ai.catalog import CACHE_SECONDS, CatalogError, OpenRouterCatalog
 from agentspace.api.deps import get_catalog
 from agentspace.config import Settings
 from agentspace.main import create_app
@@ -69,7 +70,8 @@ async def test_caches_and_serves_the_old_list_when_a_refetch_fails() -> None:
     first = await catalog.models()
     assert await catalog.models() == first and calls == 1
 
-    catalog._fetched_at = 0  # make the cache stale
+    # Make the cache stale. Not `= 0`: monotonic() counts from boot, so on a just-booted CI machine 0 is still fresh.
+    catalog._fetched_at = time.monotonic() - CACHE_SECONDS - 1
     assert await catalog.models() == first and calls == 2
 
 

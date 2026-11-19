@@ -83,8 +83,9 @@ jobs:
       - name: Lint
         run: pnpm --filter web lint
 
+      # `next typegen` writes the route types (PageProps, LayoutProps) that tsc needs; a fresh checkout has none.
       - name: Typecheck
-        run: pnpm --filter web exec tsc --noEmit
+        run: pnpm --filter web typecheck
 
       # Fails when an API route or model changed but `pnpm gen:api` wasn't run and committed.
       - name: API types are up to date
