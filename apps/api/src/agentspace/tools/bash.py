@@ -150,8 +150,10 @@ async def run_command(command: str, cwd: Path, timeout: float | None, log: Path)
         kill_group(proc.pid)
         if proc.returncode is None:
             await proc.wait()
+    code = proc.returncode
+    assert code is not None  # set once wait() returned; the assert tells the type checker
     # A signal-killed shell reports -N; report 128 + N as shells do, so it never reads as success.
-    return proc.returncode if proc.returncode >= 0 else 128 - proc.returncode
+    return code if code >= 0 else 128 - code
 
 
 def kill_group(pid: int) -> None:

@@ -26,6 +26,7 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.2.0",
     "ruff>=0.17.5",
+    "ty>=0.0.107",
 ]
 
 [tool.fastapi]
@@ -43,3 +44,7 @@ select = ["E", "F", "I", "UP", "B", "FAST"]
 [tool.ruff.lint.per-file-ignores]
 # `session_id` reaches these routes through the SessionRowDep / RunDep dependencies.
 "src/agentspace/api/sessions.py" = ["FAST003"]
+
+[tool.ty.src]
+# A one-off spike that needs the Daytona SDK, which isn't a project dependency.
+exclude = ["scripts/spike_daytona.py"]

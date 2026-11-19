@@ -9,6 +9,7 @@ from agentspace.agent.events import (
     AgentEndEvent,
     AgentEvent,
     MessageEndEvent,
+    MessageUpdateEvent,
     ToolExecutionEndEvent,
     ToolExecutionStartEvent,
     ToolExecutionUpdateEvent,
@@ -35,7 +36,7 @@ from agentspace.ai.messages import (
     ToolResultMessage,
     UserMessage,
 )
-from agentspace.ai.provider import AssistantEvent, Context, prepare_transcript
+from agentspace.ai.provider import AssistantEvent, Context, TextDeltaEvent, prepare_transcript
 from agentspace.ai.providers.fake import FakeProvider, Reply, text_reply, tool_reply
 from agentspace.tools import TOOL_SETS, build_tools
 
@@ -67,7 +68,15 @@ async def run(
 
 
 def ended(events: list[AgentEvent]) -> list[Message]:
-    return [e.message for e in events if isinstance(e, MessageEndEvent)]
+    """The LLM messages the run finished, in order."""
+    return convert_to_llm([e.message for e in events if isinstance(e, MessageEndEvent)])
+
+
+def end_of(events: list[AgentEvent]) -> AgentEndEvent:
+    """The run's last event, which must be its `agent_end`."""
+    last = events[-1]
+    assert isinstance(last, AgentEndEvent)  # narrows the event union for the type checker
+    return last
 
 
 def call(name: str, id: str = "c1", **arguments: object) -> ToolCall:
@@ -89,8 +98,8 @@ async def test_write_then_read_then_answer(tmp_path: Path) -> None:
     read_result = messages[4]
     assert isinstance(read_result, ToolResultMessage) and read_result.content[0].text == "hi there"
     assert read_result.details is not None and read_result.details["path"] == "hello.txt"
-    assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "done"
-    assert events[-1].new_messages == messages
+    assert end_of(events).reason == "done"
+    assert end_of(events).new_messages == messages
     # Every request carries the system prompt, every tool and the transcript so far.
     last = provider.contexts[-1]
     assert last.system_prompt == "sys"
@@ -118,7 +127,7 @@ async def test_tool_failures_become_error_results_and_the_loop_continues(tmp_pat
     assert texts[1].startswith("Invalid arguments for read:") and "path" in texts[1]
     assert texts[2] == "File not found: missing.txt"
     assert texts[3] == "Invalid arguments for read: Invalid JSON"
-    assert events[-1].reason == "done"
+    assert end_of(events).reason == "done"
 
 
 async def test_tool_calls_cut_off_by_length_are_not_executed(tmp_path: Path) -> None:
@@ -129,7 +138,7 @@ async def test_tool_calls_cut_off_by_length_are_not_executed(tmp_path: Path) -> 
     assert not (tmp_path / "x.txt").exists()
     result = next(m for m in ended(events) if isinstance(m, ToolResultMessage))
     assert result.is_error and "output token limit" in result.content[0].text
-    assert events[-1].reason == "done"
+    assert end_of(events).reason == "done"
 
 
 async def test_provider_error_ends_the_run(tmp_path: Path) -> None:
@@ -137,7 +146,7 @@ async def test_provider_error_ends_the_run(tmp_path: Path) -> None:
     events = await run(FakeProvider([failed]), tmp_path)
 
     assert [m.role for m in ended(events)] == ["user", "assistant"]
-    assert events[-1].reason == "error"
+    assert end_of(events).reason == "error"
 
 
 async def test_max_turns_stops_a_run_that_keeps_calling_tools(tmp_path: Path) -> None:
@@ -145,13 +154,15 @@ async def test_max_turns_stops_a_run_that_keeps_calling_tools(tmp_path: Path) ->
     events = await run(FakeProvider(replies), tmp_path, max_turns=3)
 
     assert sum(isinstance(m, AssistantMessage) for m in ended(events)) == 3
-    assert events[-1].reason == "max_turns"
+    assert end_of(events).reason == "max_turns"
 
 
 async def test_streamed_text_is_reported_as_message_updates(tmp_path: Path) -> None:
     reply = AssistantMessage(provider="fake", model="m", content=[TextContent(text="a"), TextContent(text="b")])
     events = await run(FakeProvider([reply]), tmp_path)
-    deltas = [e.event.delta for e in events if e.type == "message_update"]
+    deltas = [
+        e.event.delta for e in events if isinstance(e, MessageUpdateEvent) and isinstance(e.event, TextDeltaEvent)
+    ]
     assert deltas == ["a", "b"]
 
 
@@ -526,7 +537,7 @@ async def test_parallel_batch_prepares_every_call_before_any_runs(tmp_path: Path
     assert sorted(log[3:]) == ["run a", "run c"]
     # The refused call ends during preparation, before the next call starts.
     order = [
-        (type(e).__name__, getattr(e, "tool_call_id", None) or e.result.tool_call_id)
+        (type(e).__name__, e.tool_call_id if isinstance(e, ToolExecutionStartEvent) else e.result.tool_call_id)
         for e in events
         if isinstance(e, ToolExecutionStartEvent | ToolExecutionEndEvent)
     ]
@@ -767,7 +778,7 @@ class Queued:
         self.batches = [[UserMessage(content=text) for text in batch] for batch in batches]
         self.polls = 0
 
-    async def __call__(self) -> list[Message]:
+    async def __call__(self) -> list[AgentMessage]:
         self.polls += 1
         return list(self.batches.pop(0)) if self.batches else []
 
@@ -814,7 +825,7 @@ async def test_steering_after_a_final_answer_or_a_terminating_batch_gets_a_reply
         config = LoopConfig(get_steering_messages=Queued([], ["one more thing"]))
         events = await run(provider, tmp_path, tools=[StopTool()], config=config)
 
-        assert len(provider.contexts) == 2 and ended(events)[-1].content[0].text == "answered"
+        assert len(provider.contexts) == 2 and roles_and_text(ended(events))[-1] == "assistant:answered"
 
 
 async def test_follow_ups_are_polled_only_when_the_run_would_stop(tmp_path: Path) -> None:
@@ -875,7 +886,7 @@ async def test_continue_answers_a_transcript_that_ends_in_a_user_message_without
     # No new user message: the model is asked to reply to the transcript as it is.
     assert roles_and_text(ended(events)) == ["assistant:hello"]
     assert [m.role for m in provider.contexts[0].messages] == ["user"]
-    assert events[-1].reason == "done"
+    assert end_of(events).reason == "done"
 
 
 async def test_continue_after_a_failed_reply_retries_it(tmp_path: Path) -> None:
@@ -946,7 +957,7 @@ async def test_the_model_gets_what_convert_to_llm_returns(tmp_path: Path) -> Non
     assert seen == [["notice", "user"]]  # the converter gets the app's messages
     assert roles_and_text(provider.contexts[0].messages) == ["user:[switched]", "user:hi"]
     # Only the run's own messages are new: the notice stays in the history, unconverted.
-    assert [m.role for m in events[-1].new_messages] == ["user", "assistant"]
+    assert [m.role for m in end_of(events).new_messages] == ["user", "assistant"]
 
 
 async def test_a_failing_converter_fails_the_run_instead_of_sending_something_else(tmp_path: Path) -> None:

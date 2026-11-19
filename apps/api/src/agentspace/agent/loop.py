@@ -22,7 +22,7 @@ import asyncio
 import contextlib
 import copy
 import dataclasses
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 
 from pydantic import BaseModel, ValidationError
@@ -101,7 +101,7 @@ async def run_agent(
     max_turns: int,
     max_tokens: int | None = None,
     config: LoopConfig | None = None,
-) -> AsyncIterator[AgentEvent]:
+) -> AsyncGenerator[AgentEvent]:  # TS: AsyncGenerator<AgentEvent>; it has aclose(), a bare AsyncIterator doesn't
     """Run the agent on one prompt (or continue, with None) and yield its events: `run_loop` in a task."""
     # None marks the end: the loop task finished and no more events are coming.
     queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()

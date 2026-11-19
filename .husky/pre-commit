@@ -1,0 +1,2 @@
+# Runs the same checks as CI (.github/workflows/ci.yml) before every commit; a failure stops the commit (ADR-010).
+pnpm check

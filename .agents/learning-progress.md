@@ -4,7 +4,7 @@ How the project owner is learning the codebase, one row per activity. The rules
 are in `AGENTS.md`: predict before each step, explain it back after, a quiz before
 each commit, and a debugging session offered after every second commit.
 
-**Commits since the last debugging offer:** 1 (offered 2026-11-19 with step 15)
+**Commits since the last debugging offer:** 0 (offered 2026-11-20 with the CI commit)
 
 ## Log
 
@@ -37,3 +37,7 @@ each commit, and a debugging session offered after every second commit.
 | 2026-11-19 | After 2 commits | Debugging offer | Not taken up (moved on to step 16) | |
 | 2026-11-20 | ADR-003 step 16: app messages + `convert_to_llm` (ADR-008) | Explain-back | Skipped (went straight to "commit it") | |
 | 2026-11-20 | ADR-003 step 16: app messages + `convert_to_llm` (ADR-008) | Quiz | 2/3 | Q3: a converter that raises is not caught; the exception ends the run before `provider.stream` (`loop.py:208`), nothing is sent. No fallback |
+| 2026-11-20 | CI (ADR-010): GitHub Actions + `ty` | Prediction | Skipped ("go for 1"); asked which Python type checkers the industry uses | How the API-types check runs: export the spec with Python, generate the TS with Node, then `git diff --exit-code` fails on any change |
+| 2026-11-20 | CI (ADR-010): GitHub Actions, `ty`, pre-commit hook | Explain-back | Skipped (went straight to "let's commit it") | |
+| 2026-11-20 | CI (ADR-010): GitHub Actions, `ty`, pre-commit hook | Quiz | 0/4 | Q1: `ended()` drops notices via `convert_to_llm` (`test_loop.py:72`). Q2: `AsyncGenerator` because `aclosing()` needs `aclose()` (`find.py:63`), flagged by `ty` not ruff. Q3: `git diff --exit-code` compares working tree to the index, so unstaged regenerated API types fail the hook (`package.json:13`). Q4: `assert` narrows the type *and* raises at runtime; TS `!` is erased |
+| 2026-11-20 | After 2 commits | Debugging offer | Offered with the CI commit | |

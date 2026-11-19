@@ -1,0 +1,94 @@
+# Checks every push to dev and every pull request: lint, types, tests and build for the API and the web app (ADR-010).
+name: CI
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch or PR cancels the older run: only the latest commit's result matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Read-only: CI checks the code and never writes back to the repo.
+permissions:
+  contents: read
+
+jobs:
+  api:
+    name: api (ruff, ty, pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      # The grep and find tools run ripgrep, and their tests call it.
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ripgrep
+
+      # --locked fails if uv.lock is out of date with pyproject.toml instead of quietly updating it.
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Lint
+        run: uv run ruff check --output-format=github .
+
+      - name: Format
+        run: uv run ruff format --check .
+
+      - name: Typecheck
+        run: uv run ty check --error-on-warning --output-format=github
+
+      - name: Test
+        run: uv run pytest
+
+  web:
+    name: web (eslint, tsc, build, API types)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Reads the pnpm version from the root package.json's packageManager field.
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # Exporting the OpenAPI spec runs the FastAPI app, so this job needs Python too.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/api/uv.lock
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm --filter web lint
+
+      - name: Typecheck
+        run: pnpm --filter web exec tsc --noEmit
+
+      # Fails when an API route or model changed but `pnpm gen:api` wasn't run and committed.
+      - name: API types are up to date
+        run: pnpm check:api-types
+
+      - name: Build
+        run: pnpm --filter web build

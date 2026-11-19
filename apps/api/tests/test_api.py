@@ -1,8 +1,10 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentspace.ai.messages import ToolCall
@@ -39,7 +41,9 @@ def sse_events(text: str) -> list[dict]:
 
 def mark_running(client: TestClient, session_id: str) -> None:
     """Make the session look busy, as if a run had claimed it."""
-    client.app.state.runs.runs[session_id] = ActiveRun(session_id=session_id, messages=[], history_size=0)
+    # TS: cast() is `as FastAPI`: TestClient types `app` as any ASGI app, ours is a FastAPI one.
+    runs = cast(FastAPI, client.app).state.runs
+    runs.runs[session_id] = ActiveRun(session_id=session_id, messages=[], history_size=0)
 
 
 def test_create_list_and_get_session(client: TestClient) -> None:

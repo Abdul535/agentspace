@@ -39,7 +39,7 @@ class FakeProvider:
             return
         reply = self.replies.pop(0)
         # TS: `a if cond else b` is `cond ? a : b`; model_copy(deep=True) is like structuredClone.
-        message = reply(context) if callable(reply) else reply.model_copy(deep=True)
+        message = reply.model_copy(deep=True) if isinstance(reply, AssistantMessage) else reply(context)
         message.provider, message.model = self.name, model  # TS: [a, b] = [x, y]
         yield StartEvent()
         for block in message.content:

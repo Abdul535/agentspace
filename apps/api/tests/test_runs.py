@@ -6,14 +6,18 @@ import threading
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
+from anyio.from_thread import BlockingPortal
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import agentspace.runs
 from agentspace.agent.events import AgentEndEvent, MessageEndEvent, MessageStartEvent, TurnStartEvent
 from agentspace.agent.loop import Emit
-from agentspace.ai.messages import AssistantMessage, Message, TextContent, UserMessage
+from agentspace.agent.messages import AgentMessage
+from agentspace.ai.messages import AssistantMessage, TextContent, UserMessage
 from agentspace.ai.provider import AssistantEvent, Context, DoneEvent, StartEvent, TextDeltaEvent
 from agentspace.api.deps import provider_lookup
 from agentspace.config import Settings
@@ -68,6 +72,18 @@ def in_background(fn: Callable[[], object]) -> dict:
     return out
 
 
+def portal(client: TestClient) -> BlockingPortal:
+    """The client's portal into the app's event loop; it exists while the client is open (`with TestClient(...)`)."""
+    assert client.portal is not None  # narrows `BlockingPortal | None` for the type checker
+    return client.portal
+
+
+def user_texts(messages: list[AgentMessage]) -> list[str]:
+    """The text of each message, all of which must be user messages."""
+    assert all(isinstance(m, UserMessage) for m in messages)
+    return [m.content for m in messages if isinstance(m, UserMessage)]
+
+
 def wait_for(condition: Callable[[], bool]) -> None:
     """Poll until the condition holds, failing after 5 s."""
     deadline = time.monotonic() + 5
@@ -89,7 +105,7 @@ def test_a_late_client_gets_a_snapshot_with_the_partial_reply_then_live_events(
         provider.gate.set()
 
     # The GET below blocks until the run ends, so the gate opens from the app's event loop.
-    client.portal.start_task_soon(open_gate_soon)
+    portal(client).start_task_soon(open_gate_soon)
     events = sse_events(client.get(f"/sessions/{session_id}/events").text)
     post["thread"].join(5)
 
@@ -134,10 +150,11 @@ def test_abort_stops_the_run_keeps_finished_messages_and_frees_the_slot(
 
 def test_closing_a_subscription_does_not_stop_the_run(client: TestClient) -> None:
     session_id = client.post("/sessions", json={}).json()["id"]
-    runs: RunManager = client.app.state.runs
+    # TS: cast() is `as FastAPI`: TestClient types `app` as any ASGI app, ours is a FastAPI one.
+    runs: RunManager = cast(FastAPI, client.app).state.runs
 
     async def scenario() -> None:
-        async def no_history() -> list[Message]:
+        async def no_history() -> list[AgentMessage]:
             return []
 
         active = await runs.claim(session_id, no_history)
@@ -163,17 +180,17 @@ def test_closing_a_subscription_does_not_stop_the_run(client: TestClient) -> Non
         assert active.task is not None
         await active.task
 
-    client.portal.call(scenario)
+    portal(client).call(scenario)
     detail = client.get(f"/sessions/{session_id}").json()
     assert [m["role"] for m in detail["messages"]] == ["user", "assistant"] and detail["running"] is False
 
 
 def test_a_crashed_loop_ends_its_subscribers_with_an_error_and_frees_the_slot(client: TestClient) -> None:
     session_id = client.post("/sessions", json={}).json()["id"]
-    runs: RunManager = client.app.state.runs
+    runs: RunManager = cast(FastAPI, client.app).state.runs
 
     async def scenario() -> list:
-        async def no_history() -> list[Message]:
+        async def no_history() -> list[AgentMessage]:
             return []
 
         active = await runs.claim(session_id, no_history)
@@ -185,7 +202,7 @@ def test_a_crashed_loop_ends_its_subscribers_with_an_error_and_frees_the_slot(cl
         queue = runs.start(active, loop)
         return [event async for event in read_events(active, queue)]
 
-    events = client.portal.call(scenario)
+    events = portal(client).call(scenario)
     assert [e.type for e in events] == ["turn_start", "agent_end"] and events[-1].reason == "error"
     assert not runs.is_running(session_id)
 
@@ -217,7 +234,7 @@ def test_a_message_steered_in_mid_run_gets_its_own_reply(client: TestClient, pro
     post = in_background(lambda: client.post(f"/sessions/{session_id}/messages", json={"content": "hi"}))
     assert provider.waiting.wait(5)
     assert client.post(f"/sessions/{session_id}/steer", json={"content": "shorter please"}).status_code == 202
-    client.portal.call(provider.gate.set)
+    portal(client).call(provider.gate.set)
     post["thread"].join(5)
 
     events = sse_events(post["result"].text)
@@ -236,8 +253,8 @@ def test_queues_hand_over_one_message_or_all_of_them() -> None:
     for queue in (one, everything):
         queue.messages = [UserMessage(content="a"), UserMessage(content="b")]
 
-    assert [m.content for m in one.drain()] == ["a"] and [m.content for m in one.drain()] == ["b"]
-    assert [m.content for m in everything.drain()] == ["a", "b"] and everything.drain() == []
+    assert user_texts(one.drain()) == ["a"] and user_texts(one.drain()) == ["b"]
+    assert user_texts(everything.drain()) == ["a", "b"] and everything.drain() == []
 
 
 def test_after_the_last_empty_follow_up_poll_the_run_refuses_new_messages() -> None:
@@ -270,7 +287,7 @@ def test_continue_after_a_stop_answers_the_prompt_without_adding_one(
     provider.waiting.clear()
     cont = in_background(lambda: client.post(f"{url}/continue"))
     assert provider.waiting.wait(5)
-    client.portal.call(provider.gate.set)
+    portal(client).call(provider.gate.set)
     cont["thread"].join(5)
 
     events = sse_events(cont["result"].text)

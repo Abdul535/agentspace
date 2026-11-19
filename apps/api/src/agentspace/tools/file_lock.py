@@ -6,7 +6,7 @@ order and the lookup below never awaits, so pi's extra registration queue isn't 
 """
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -26,7 +26,7 @@ _entries: dict[Path, _Entry] = {}
 
 # TS: an async context manager; `async with file_lock(p):` is like `await using _ = await fileLock(p)`.
 @asynccontextmanager
-async def file_lock(path: Path) -> AsyncIterator[None]:
+async def file_lock(path: Path) -> AsyncGenerator[None]:
     """Hold `path`'s lock for the body of the `async with`; other calls on the same file wait their turn."""
     key = path.resolve()  # follows symlinks, and works for files that don't exist yet
     entry = _entries.setdefault(key, _Entry())  # TS: map.get(key) ?? map.set(key, new Entry()).get(key)

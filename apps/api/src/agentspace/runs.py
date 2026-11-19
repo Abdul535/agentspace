@@ -13,7 +13,7 @@ in after the current turn, follow-ups once the run would otherwise stop.
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -195,7 +195,7 @@ def end_stream(queue: Subscriber) -> None:
     queue.put_nowait(None)
 
 
-async def read_events(run: ActiveRun, queue: Subscriber) -> AsyncIterator[AgentEvent]:
+async def read_events(run: ActiveRun, queue: Subscriber) -> AsyncGenerator[AgentEvent]:
     """Yield a subscriber's events until the run ends; leaving early (client gone) only unsubscribes."""
     try:
         # TS: `:=` assigns inside the condition, like `while ((event = await queue.get()) !== null)`.

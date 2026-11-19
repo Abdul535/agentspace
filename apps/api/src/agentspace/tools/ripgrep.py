@@ -7,7 +7,7 @@ sorted by path so results and limits are the same on every run.
 
 import asyncio
 import shutil
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncGenerator, Sequence
 from pathlib import Path
 
 from agentspace.agent.tool import ToolError
@@ -17,7 +17,8 @@ BASE_ARGS = ("--no-config", "--hidden", "--no-require-git", "--sort", "path", "-
 
 
 # TS: an `async function*`; the caller iterates it with `async for`, like `for await`.
-async def rg_lines(flags: Sequence[str], targets: Sequence[str], cwd: Path) -> AsyncIterator[str]:
+# TS: AsyncGenerator<string>; typed as a generator (not AsyncIterator) so `aclosing` can call its aclose().
+async def rg_lines(flags: Sequence[str], targets: Sequence[str], cwd: Path) -> AsyncGenerator[str]:
     """Run `rg` in `cwd` and yield its output lines.
 
     Iterate it inside `contextlib.aclosing(...)`: stopping early then kills rg at once.

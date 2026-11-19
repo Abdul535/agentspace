@@ -1,8 +1,10 @@
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import httpx
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentspace.ai.catalog import CatalogError, OpenRouterCatalog
@@ -96,5 +98,8 @@ def test_models_route_returns_catalog_default_and_favorites(client: TestClient) 
 
 
 def test_models_route_is_502_when_openrouter_is_down(client: TestClient) -> None:
-    client.app.dependency_overrides[get_catalog] = lambda: catalog_with(lambda request: httpx.Response(503))
+    # TS: cast() is `as FastAPI`: TestClient types `app` as any ASGI app, ours is a FastAPI one.
+    cast(FastAPI, client.app).dependency_overrides[get_catalog] = lambda: catalog_with(
+        lambda request: httpx.Response(503)
+    )
     assert client.get("/models").status_code == 502

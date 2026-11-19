@@ -9,7 +9,7 @@ Create Date: 2026-11-16 17:02:17.445067
 from collections.abc import Sequence
 
 import sqlalchemy as sa
-import sqlmodel
+import sqlmodel.sql.sqltypes  # the columns below use sqlmodel.sql.sqltypes; importing it makes that explicit
 from alembic import op
 
 # revision identifiers, used by Alembic.

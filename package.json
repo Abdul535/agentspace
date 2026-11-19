@@ -6,7 +6,15 @@
     "dev:web": "pnpm --filter web dev",
     "build:web": "pnpm --filter web build",
     "lint:web": "pnpm --filter web lint",
-    "gen:api": "uv run --project apps/api python apps/api/scripts/export_openapi.py > apps/web/openapi.json && pnpm --filter web gen:api"
+    "gen:api": "uv run --project apps/api python apps/api/scripts/export_openapi.py > apps/web/openapi.json && pnpm --filter web gen:api",
+    "check": "pnpm check:api && pnpm check:web",
+    "check:api": "cd apps/api && uv run --locked ruff check . && uv run ruff format --check . && uv run ty check --error-on-warning && uv run pytest -q",
+    "check:web": "pnpm lint:web && pnpm --filter web exec tsc --noEmit && pnpm check:api-types && pnpm build:web",
+    "check:api-types": "pnpm gen:api && git diff --exit-code -- apps/web/openapi.json apps/web/src/lib/api/schema.d.ts || (echo \"API types are stale: run pnpm gen:api and commit the result.\" && exit 1)",
+    "prepare": "husky"
   },
-  "packageManager": "pnpm@10.25.0"
+  "packageManager": "pnpm@10.25.0",
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
 }

@@ -1,6 +1,6 @@
 """The FastAPI app: wires settings, the database and the routers together."""
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from asyncer import asyncify
@@ -21,7 +21,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # TS: code before `yield` runs at startup and code after it at shutdown, like a setup that returns a cleanup.
     @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         """On startup: create the data folder, migrate the DB, open the engine. On shutdown: stop runs, close it."""
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         if settings.auto_migrate:

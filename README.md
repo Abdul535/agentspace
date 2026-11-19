@@ -77,11 +77,17 @@ Set in the environment or `apps/api/.env`: `OPENROUTER_API_KEY`, `AGENTSPACE_DEF
 ## Development
 
 ```bash
+pnpm check                      # from the root: everything CI runs (lint, format, types, tests, build)
 uv run pytest                   # from apps/api
 uv run ruff check . && uv run ruff format .
+uv run ty check                 # Python type check
 pnpm lint:web                   # from the root
 pnpm gen:api                    # regenerate the web app's API types after an API change
 ```
+
+`pnpm install` sets up a git pre-commit hook (husky) that runs `pnpm check` before every
+commit; CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs the same checks on
+every push to `dev` and every pull request.
 
 `pnpm gen:api` exports the OpenAPI spec without starting the server and runs
 `openapi-typescript` into `apps/web/src/lib/api/schema.d.ts`; both generated files are
