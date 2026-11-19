@@ -1,4 +1,4 @@
-"""FastAPI dependencies shared by the routes: settings, database, store, provider, model catalog and run slot."""
+"""FastAPI dependencies shared by the routes: settings, database, store, provider, model catalog, runs and run slot."""
 
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -12,6 +12,7 @@ from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.ai.provider import Provider
 from agentspace.ai.providers import UnknownProviderError, get_provider
 from agentspace.config import Settings
+from agentspace.runs import ActiveRun, RunManager, SessionBusyError
 from agentspace.session.db import open_db
 from agentspace.session.models import SessionRow
 from agentspace.session.store import SessionStore
@@ -72,37 +73,46 @@ async def get_session_row(session_id: str, store: StoreDep) -> SessionRow:
 SessionRowDep = Annotated[SessionRow, Depends(get_session_row)]
 
 
+def get_runs(request: Request) -> RunManager:
+    """The app-wide run manager (ADR-007)."""
+    return request.app.state.runs
+
+
+RunsDep = Annotated[RunManager, Depends(get_runs)]
+
+
 @dataclass(frozen=True)
 class Run:
-    """What a prompt run needs: the session, its provider and its workspace folder."""
+    """What starting a prompt run needs: the session, its provider, its workspace and its claimed run slot."""
 
     session: SessionRow
     provider: Provider
     workspace: Path
+    active: ActiveRun
 
 
 async def claim_run(
-    request: Request, session: SessionRowDep, settings: SettingsDep, lookup: ProviderLookupDep
+    session: SessionRowDep, settings: SettingsDep, lookup: ProviderLookupDep, store: StoreDep, runs: RunsDep
 ) -> AsyncIterator[Run]:
-    """Hold the session's single run slot until the response finishes streaming.
+    """Claim the session's run slot, with its history loaded, before the stream starts.
 
-    Checks run here, before the stream starts, so they can still answer with an
-    HTTP error. The slot lives in this process's memory.
+    Checks run here so they can still answer with an HTTP error. The route starts
+    the run; if it never does (e.g. it failed first), the slot is given back.
     """
-    active: set[str] = request.app.state.active_runs
-    if session.id in active:
-        # TS: raising HTTPException ends the request with that status, like `throw new HTTPException(409)` in Hono.
-        raise HTTPException(status.HTTP_409_CONFLICT, "This session is already running a prompt.")
     try:
         provider = lookup(session.provider)
     except UnknownProviderError as exc:
         # TS: `raise ... from exc` is `throw new Error(msg, { cause: exc })`.
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
-    active.add(session.id)
     try:
-        yield Run(session=session, provider=provider, workspace=settings.workspaces_dir / session.id)
+        active = await runs.claim(session.id, lambda: store.messages(session.id))
+    except SessionBusyError as exc:
+        # TS: raising HTTPException ends the request with that status, like `throw new HTTPException(409)` in Hono.
+        raise HTTPException(status.HTTP_409_CONFLICT, "This session is already running a prompt.") from exc
+    try:
+        yield Run(session=session, provider=provider, workspace=settings.workspaces_dir / session.id, active=active)
     finally:
-        active.discard(session.id)
+        runs.release(active)  # no-op once the run has started: from then on the run frees its own slot
 
 
 RunDep = Annotated[Run, Depends(claim_run)]

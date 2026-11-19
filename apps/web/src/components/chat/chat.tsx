@@ -15,8 +15,9 @@ import { useAgentRun } from "@/lib/api/use-agent-run";
 
 export function Chat({ sessionId }: { sessionId: string }) {
   const session = useSession(sessionId);
-  const run = useAgentRun(sessionId);
-  const messages = [...(session.data?.messages ?? []), ...run.messages];
+  const run = useAgentRun(sessionId, session.data?.running ?? false);
+  // While attached to a run, its snapshot is the transcript; the fetched one may be missing what it saved since.
+  const messages = [...(run.base ?? session.data?.messages ?? []), ...run.messages];
   const [activityOpen, setActivityOpen] = useState(true);
 
   // Keep the newest output in view while it streams, unless the reader scrolled up.

@@ -44,6 +44,13 @@ class SessionStore:
         await self.db.commit()
         return session
 
+    async def set_title(self, session: SessionRow, title: str) -> SessionRow:
+        """Name the session."""
+        session.title = title
+        self.db.add(session)
+        await self.db.commit()
+        return session
+
     async def messages(self, session_id: str) -> list[Message]:
         """A session's transcript, oldest message first."""
         result = await self.db.exec(

@@ -1,6 +1,6 @@
 # ADR-001 — Minimal agent core: own loop, pluggable providers, sessions in SQLite
 
-- **Status:** Accepted
+- **Status:** Superseded in part by ADR-007 (a run is no longer tied to its HTTP request)
 - **Date:** 2026-11-16
 - **Deciders:** project owner
 

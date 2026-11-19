@@ -37,7 +37,7 @@ export interface paths {
         };
         /**
          * Get Session
-         * @description One session and its transcript.
+         * @description One session and its saved transcript; while it runs, `GET .../events` also has the reply in progress.
          */
         get: operations["get_session_sessions__session_id__get"];
         put?: never;
@@ -63,13 +63,55 @@ export interface paths {
         put?: never;
         /**
          * Send Message
-         * @description Run the agent on a new user message and stream its events as SSE.
+         * @description Start a run on a new user message and stream its events as SSE.
          *
          *     Each SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.
-         *     Messages are saved as each one ends, so a dropped connection keeps everything
-         *     finished before it, and the run stops with the connection.
+         *     The server owns the run (ADR-007): closing this stream only stops listening.
+         *     Reattach with `GET .../events`; stop the run with `POST .../abort`.
          */
         post: operations["send_message_sessions__session_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/{session_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Watch Session
+         * @description Attach to the session's run: a `run_snapshot` first, then live events until the run ends.
+         *
+         *     With no run in progress, the stream is one snapshot of the saved transcript.
+         */
+        get: operations["watch_session_sessions__session_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/sessions/{session_id}/abort": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Abort Run
+         * @description Stop the session's run; finished messages are kept. 409 if nothing is running.
+         */
+        post: operations["abort_run_sessions__session_id__abort_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -244,6 +286,28 @@ export interface components {
             content: string;
         };
         /**
+         * RunSnapshot
+         * @description First event of `GET /sessions/{id}/events`: where the run is, so a late client can catch up.
+         */
+        RunSnapshot: {
+            /**
+             * Type
+             * @default run_snapshot
+             * @constant
+             */
+            type: "run_snapshot";
+            /** Running */
+            running: boolean;
+            /** Messages */
+            messages: components["schemas"]["Message"][];
+            streaming?: components["schemas"]["AssistantMessage"] | null;
+            /**
+             * Pending Tools
+             * @default []
+             */
+            pending_tools: string[];
+        };
+        /**
          * SessionCreate
          * @description Fields for a new session; anything left out uses the app's defaults.
          */
@@ -285,6 +349,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
             /** Messages */
             messages: components["schemas"]["Message"][];
         };
@@ -315,6 +384,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /**
+             * Running
+             * @default false
+             */
+            running: boolean;
         };
         /**
          * SessionUpdate
@@ -716,6 +790,66 @@ export interface operations {
                 content: {
                     "text/event-stream": unknown;
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    watch_session_sessions__session_id__events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    abort_run_sessions__session_id__abort_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

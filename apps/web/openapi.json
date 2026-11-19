@@ -77,7 +77,7 @@
           "sessions"
         ],
         "summary": "Get Session",
-        "description": "One session and its transcript.",
+        "description": "One session and its saved transcript; while it runs, `GET .../events` also has the reply in progress.",
         "operationId": "get_session_sessions__session_id__get",
         "parameters": [
           {
@@ -171,7 +171,7 @@
           "sessions"
         ],
         "summary": "Send Message",
-        "description": "Run the agent on a new user message and stream its events as SSE.\n\nEach SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.\nMessages are saved as each one ends, so a dropped connection keeps everything\nfinished before it, and the run stops with the connection.",
+        "description": "Start a run on a new user message and stream its events as SSE.\n\nEach SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.\nThe server owns the run (ADR-007): closing this stream only stops listening.\nReattach with `GET .../events`; stop the run with `POST .../abort`.",
         "operationId": "send_message_sessions__session_id__messages_post",
         "parameters": [
           {
@@ -226,6 +226,115 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/events": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Watch Session",
+        "description": "Attach to the session's run: a `run_snapshot` first, then live events until the run ends.\n\nWith no run in progress, the stream is one snapshot of the saved transcript.",
+        "operationId": "watch_session_sessions__session_id__events_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "string",
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/components/schemas/RunSnapshot"
+                          },
+                          {
+                            "$ref": "#/components/schemas/AgentEvent"
+                          }
+                        ],
+                        "title": "Streamitem Watch Session Sessions  Session Id  Events Get"
+                      }
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sessions/{session_id}/abort": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Abort Run",
+        "description": "Stop the session's run; finished messages are kept. 409 if nothing is running.",
+        "operationId": "abort_run_sessions__session_id__abort_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -650,6 +759,52 @@
         "title": "PromptCreate",
         "description": "A new user message to run the agent on."
       },
+      "RunSnapshot": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "run_snapshot",
+            "title": "Type",
+            "default": "run_snapshot"
+          },
+          "running": {
+            "type": "boolean",
+            "title": "Running"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/Message"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "streaming": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AssistantMessage"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pending_tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pending Tools",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "running",
+          "messages"
+        ],
+        "title": "RunSnapshot",
+        "description": "First event of `GET /sessions/{id}/events`: where the run is, so a late client can catch up."
+      },
       "SessionCreate": {
         "properties": {
           "provider": {
@@ -757,6 +912,11 @@
             "format": "date-time",
             "title": "Updated At"
           },
+          "running": {
+            "type": "boolean",
+            "title": "Running",
+            "default": false
+          },
           "messages": {
             "items": {
               "$ref": "#/components/schemas/Message"
@@ -825,6 +985,11 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "running": {
+            "type": "boolean",
+            "title": "Running",
+            "default": false
           }
         },
         "type": "object",

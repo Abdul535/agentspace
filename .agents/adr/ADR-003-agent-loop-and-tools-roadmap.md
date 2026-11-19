@@ -163,7 +163,7 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
       that always continues can't loop forever. pi has no such cap.
 
 ### Phase 3 — Runs that outlive the request
-13. [ ] **Background runs.** A run is an `asyncio` task owned by the server, not
+13. [x] **Background runs.** Built per ADR-007 (the DB lock is deferred there). A run is an `asyncio` task owned by the server, not
     by the request. Clients subscribe to its events and can reconnect, and an
     explicit `POST /sessions/{id}/abort` cancels it. Move the run lock into the
     database so the API can run with several workers. Needs its own ADR, because

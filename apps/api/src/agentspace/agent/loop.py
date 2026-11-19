@@ -8,8 +8,9 @@ call set `terminate`, or when `finish_turn` says so; `max_turns` caps it either 
 The loop holds no storage; callers persist messages from `message_end` events.
 
 `run_loop` reports events through an `emit` callback, so any code holding it can
-report one (ADR-006). `run_agent` wraps it as an async generator for the SSE
-route; closing or cancelling that generator stops the run at its current await.
+report one (ADR-006). `run_agent` wraps it as an async generator for callers
+that read every event; closing or cancelling that generator stops the run at its
+current await. The server drives `run_loop` through `RunManager` instead (ADR-007).
 """
 
 import asyncio

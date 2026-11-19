@@ -4,7 +4,7 @@ How the project owner is learning the codebase, one row per activity. The rules
 are in `AGENTS.md`: predict before each step, explain it back after, a quiz before
 each commit, and a debugging session offered after every second commit.
 
-**Commits since the last debugging offer:** 1 (started counting 2026-11-18)
+**Commits since the last debugging offer:** 2 (started counting 2026-11-18)
 
 ## Log
 
@@ -24,3 +24,5 @@ each commit, and a debugging session offered after every second commit.
 | 2026-11-18 | Debug session 1: `except BaseException` swallows cancellation | Debugging | Found the function unaided, the line with one nudge; the why needed a walkthrough | `run_agent` vs `run_loop`, tasks and cancellation, `Exception` vs `BaseException`: see `.agents/learning-plan.md` topics 1–4 |
 | 2026-11-18 | Cancellation test assertion; ADR-004, Daytona spike, Phase 2 research | Quiz | Skipped at the owner's request | |
 | 2026-11-19 | More reference designs, architectures diagram, ADR-003 accepted | Quiz | 4/4 | |
+| 2026-11-19 | ADR-003 step 13: background runs | Prediction | Right core idea: server owns the run, client re-subscribes. Proposed Redis for state | Missed the catch-up gap (events between disconnect and resubscribe); state that SQLite already holds the transcript; Redis not needed for one process |
+| 2026-11-19 | ADR-003 step 13: background runs (ADR-007) | Explain-back, quiz | Skipped at the owner's request ("commit and don't ask anything") | Background runs untested by quiz: `RunManager.claim` lock, done-callback vs `finally`, snapshot + subscribe with no `await` between |
