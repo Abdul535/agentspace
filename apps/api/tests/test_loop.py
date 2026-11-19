@@ -25,8 +25,16 @@ from agentspace.agent.hooks import (
 )
 from agentspace.agent.loop import run_agent, run_loop
 from agentspace.agent.tool import OnUpdate, Tool, ToolContext, ToolResult
-from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
-from agentspace.ai.provider import AssistantEvent, Context
+from agentspace.ai.messages import (
+    AssistantMessage,
+    Message,
+    StopReason,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
+from agentspace.ai.provider import AssistantEvent, Context, prepare_transcript
 from agentspace.ai.providers.fake import FakeProvider, Reply, text_reply, tool_reply
 from agentspace.tools import TOOL_SETS, build_tools
 
@@ -836,3 +844,65 @@ async def test_max_turns_caps_a_run_that_keeps_getting_steered(tmp_path: Path) -
 
     assert len(provider.contexts) == 3
     assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "max_turns"
+
+
+async def continue_run(provider: FakeProvider, workspace: Path, history: list[Message]) -> list[AgentEvent]:
+    """Run with no prompt: continue `history` as it is."""
+    return [
+        event
+        async for event in run_agent(
+            provider=provider,
+            model="m",
+            system_prompt="sys",
+            tools=build_tools(TOOL_SETS["all"], bash=True),
+            history=history,
+            prompt=None,
+            ctx=ToolContext(workspace=workspace),
+            max_turns=10,
+        )
+    ]
+
+
+def reply(text: str, stop_reason: StopReason = "stop") -> AssistantMessage:
+    return AssistantMessage(provider="fake", model="m", content=[TextContent(text=text)], stop_reason=stop_reason)
+
+
+async def test_continue_answers_a_transcript_that_ends_in_a_user_message_without_adding_one(tmp_path: Path) -> None:
+    provider = FakeProvider([text_reply("hello")])
+    events = await continue_run(provider, tmp_path, [UserMessage(content="hi")])
+
+    # No new user message: the model is asked to reply to the transcript as it is.
+    assert roles_and_text(ended(events)) == ["assistant:hello"]
+    assert [m.role for m in provider.contexts[0].messages] == ["user"]
+    assert events[-1].reason == "done"
+
+
+async def test_continue_after_a_failed_reply_retries_it(tmp_path: Path) -> None:
+    provider = FakeProvider([text_reply("hello")])
+    history: list[Message] = [UserMessage(content="hi"), reply("Hel", stop_reason="error")]
+    events = await continue_run(provider, tmp_path, history)
+
+    assert roles_and_text(ended(events)) == ["assistant:hello"]
+    # The failed reply is dropped on its way to the model, so it sees the user message last.
+    assert [m.role for m in prepare_transcript(provider.contexts[0].messages)] == ["user"]
+
+
+async def test_continue_after_a_tool_call_cut_off_by_a_crash_tells_the_model_it_was_interrupted(
+    tmp_path: Path,
+) -> None:
+    provider = FakeProvider([text_reply("let me retry")])
+    history: list[Message] = [UserMessage(content="ls"), tool_reply(call("ls", "c1"))]
+    await continue_run(provider, tmp_path, history)
+
+    # What the provider adapter sends: the dangling call gets an error result.
+    sent = prepare_transcript(provider.contexts[0].messages)
+    assert [m.role for m in sent] == ["user", "assistant", "tool_result"]
+    assert isinstance(sent[-1], ToolResultMessage) and sent[-1].is_error
+
+
+@pytest.mark.parametrize("history", [[], [UserMessage(content="hi"), reply("hello")]], ids=["empty", "answered"])
+async def test_continue_refuses_a_transcript_with_nothing_to_answer(tmp_path: Path, history: list[Message]) -> None:
+    provider = FakeProvider([text_reply("never")])
+    with pytest.raises(ValueError, match="Cannot continue"):
+        await continue_run(provider, tmp_path, history)
+    assert provider.contexts == []

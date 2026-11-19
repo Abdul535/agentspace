@@ -1,7 +1,8 @@
-"""HTTP routes for sessions: create, list, read, switch model, send a prompt, watch, steer or stop its run."""
+"""HTTP routes for sessions: create, list, read, switch model, prompt or continue, watch, steer or stop a run."""
 
-from collections.abc import AsyncIterable
+from collections.abc import AsyncIterable, AsyncIterator
 from datetime import datetime
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.sse import EventSourceResponse
@@ -9,12 +10,13 @@ from pydantic import BaseModel, Field
 
 from agentspace.agent.events import AgentEvent
 from agentspace.agent.hooks import LoopConfig
-from agentspace.agent.loop import Emit, run_loop
+from agentspace.agent.loop import Emit, can_continue, run_loop
 from agentspace.agent.prompt import build_system_prompt
 from agentspace.agent.tool import ToolContext
 from agentspace.ai.messages import Message, UserMessage
 from agentspace.ai.providers import PROVIDERS
-from agentspace.api.deps import RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
+from agentspace.api.deps import Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
+from agentspace.config import Settings
 from agentspace.runs import QueueKind, RunManager, RunSnapshot, read_events
 from agentspace.session.models import SessionRow
 from agentspace.tools import TOOL_SETS, ToolSetName, build_tools
@@ -54,6 +56,8 @@ class SessionDetail(SessionPublic):
     """A session with its full transcript."""
 
     messages: list[Message]
+    can_continue: bool
+    """Whether `POST .../continue` can run: the transcript ends with the model still owing a reply."""
 
 
 class SessionUpdate(BaseModel):
@@ -107,7 +111,8 @@ async def list_sessions(store: StoreDep, runs: RunsDep) -> list[SessionPublic]:
 async def get_session(session: SessionRowDep, store: StoreDep, runs: RunsDep) -> SessionDetail:
     """One session and its saved transcript; while it runs, `GET .../events` also has the reply in progress."""
     # TS: `**dict` spreads keyword arguments: new SessionDetail({ ...public, messages }).
-    return SessionDetail(**public(session, runs).model_dump(), messages=await store.messages(session.id))
+    messages = await store.messages(session.id)
+    return SessionDetail(**public(session, runs).model_dump(), messages=messages, can_continue=can_continue(messages))
 
 
 @router.patch("/{session_id}")
@@ -137,20 +142,49 @@ async def send_message(
     The server owns the run (ADR-007): closing this stream only stops listening.
     Reattach with `GET .../events`; stop the run with `POST .../abort`.
     """
-    session = run.session
     # Untitled sessions take their title from the first prompt.
-    if session.title is None:
-        await store.set_title(session, body.content[:80])
-    run.workspace.mkdir(parents=True, exist_ok=True)
+    if run.session.title is None:
+        await store.set_title(run.session, body.content[:80])
+    async for event in stream_run(run, UserMessage(content=body.content), settings, runs):
+        yield event
 
+
+def continuable(run: RunDep) -> Run:
+    """The claimed run, if its transcript can be continued; 422 otherwise (the slot is then given back)."""
+    if not can_continue(run.active.messages):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Nothing to continue: the transcript is empty or already ends with the agent's reply.",
+        )
+    return run
+
+
+@router.post("/{session_id}/continue", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
+async def continue_run(
+    run: Annotated[Run, Depends(continuable)], settings: SettingsDep, runs: RunsDep
+) -> AsyncIterable[AgentEvent]:
+    """Start a run on the transcript as it is, with no new message: a retry after an error, a stop or a crash.
+
+    Streams like `POST .../messages`. 409 if a run is going, 422 if the transcript
+    is empty or ends with the agent's reply (pi's `agentLoopContinue`).
+    """
+    async for event in stream_run(run, None, settings, runs):
+        yield event
+
+
+async def stream_run(
+    run: Run, prompt: UserMessage | None, settings: Settings, runs: RunManager
+) -> AsyncIterator[AgentEvent]:
+    """Start the claimed run in the background, on a prompt or continuing, and yield its events to this client."""
+    session = run.session
+    run.workspace.mkdir(parents=True, exist_ok=True)
     tools = build_tools(session.tools, bash=settings.enable_bash)
     system_prompt = build_system_prompt(session.system_prompt, tools)
     history = run.active.messages[:]  # a copy: the run appends to its own list as messages finish
-    prompt = UserMessage(content=body.content)
 
     # TS: an inner function closing over this request's values; the manager calls it with its own `emit`.
     async def loop(emit: Emit) -> None:
-        """This prompt's agent loop."""
+        """This run's agent loop."""
         await run_loop(
             provider=run.provider,
             model=session.model,

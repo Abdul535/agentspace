@@ -240,6 +240,71 @@
         }
       }
     },
+    "/sessions/{session_id}/continue": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Continue Run",
+        "description": "Start a run on the transcript as it is, with no new message: a retry after an error, a stop or a crash.\n\nStreams like `POST .../messages`. 409 if a run is going, 422 if the transcript\nis empty or ends with the agent's reply (pi's `agentLoopContinue`).",
+        "operationId": "continue_run_sessions__session_id__continue_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "string",
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "$ref": "#/components/schemas/AgentEvent"
+                      }
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/events": {
       "get": {
         "tags": [
@@ -1025,6 +1090,10 @@
             },
             "type": "array",
             "title": "Messages"
+          },
+          "can_continue": {
+            "type": "boolean",
+            "title": "Can Continue"
           }
         },
         "type": "object",
@@ -1037,7 +1106,8 @@
           "tools",
           "created_at",
           "updated_at",
-          "messages"
+          "messages",
+          "can_continue"
         ],
         "title": "SessionDetail",
         "description": "A session with its full transcript."

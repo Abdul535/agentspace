@@ -4,7 +4,7 @@ How the project owner is learning the codebase, one row per activity. The rules
 are in `AGENTS.md`: predict before each step, explain it back after, a quiz before
 each commit, and a debugging session offered after every second commit.
 
-**Commits since the last debugging offer:** 1 (started counting 2026-11-18)
+**Commits since the last debugging offer:** 0 (offered 2026-11-19 with step 15)
 
 ## Log
 
@@ -29,3 +29,7 @@ each commit, and a debugging session offered after every second commit.
 | 2026-11-19 | After 2 commits | Debugging offer | Offered with step 14 | |
 | 2026-11-19 | ADR-003 step 14: steering and follow-up queues | Prediction | Skipped ("go for step 14"); debugging offer not taken up | Where queued messages enter the loop; steering vs follow-up timing; `one_at_a_time` vs `all` |
 | 2026-11-19 | ADR-003 step 14: steering and follow-up queues | Explain-back, quiz | Skipped at the owner's request ("commit and don't ask anything") | Loop poll order (steering before follow-ups), `accepting` flag in `take_follow_ups`, why the web lists a queued message before the request |
+| 2026-11-19 | ADR-003 step 15: continue | Prediction | Didn't know; walked through pi's `agentLoopContinue` / `Agent.continue` | Why a transcript ending in an assistant message can't continue (the model would be replying to itself); continue = run the loop with no new prompt |
+| 2026-11-19 | ADR-003 step 15: continue | Explain-back | Skipped (went straight to "commit and push") | |
+| 2026-11-19 | ADR-003 step 15: continue | Quiz | 1/3 answered right, 1 skipped | Q1 skipped: `can_continue` on a transcript ending in a failed reply (True: `prepare_transcript` drops it). Q2: a 422 from a dependency never starts the run; `claim_run`'s `finally` → `release` frees the slot. Q4 (step 14 gap, still open): after the last empty follow-up poll `accepting` is False, so steer gets a 409, not a conversion |
+| 2026-11-19 | After 2 commits | Debugging offer | Offered with step 15 | |

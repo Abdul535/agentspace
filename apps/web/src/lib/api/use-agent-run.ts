@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, errorMessage, type Message } from "./client";
 import { queryKeys } from "./queries";
-import { type RunStreamEvent, streamPrompt, watchRun } from "./stream";
+import { type RunStreamEvent, streamContinue, streamPrompt, watchRun } from "./stream";
 
 /** Where a message typed during a run goes: after the current turn, or once the run would stop. */
 export type QueueKind = "steer" | "follow_up";
@@ -146,6 +146,11 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
     void listen((signal) => streamPrompt(sessionId, content, signal));
   }
 
+  // Have the agent answer the transcript as it stands, e.g. after an error, a stop or a server restart.
+  function resume() {
+    void listen((signal) => streamContinue(sessionId, signal));
+  }
+
   function updateQueued(next: QueuedMessage[]) {
     queuedRef.current = next;
     setQueued(next);
@@ -171,5 +176,5 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
     await api.POST("/sessions/{session_id}/abort", { params: { path: { session_id: sessionId } } });
   }
 
-  return { ...state, queued, send, queue, stop };
+  return { ...state, queued, send, queue, stop, resume };
 }

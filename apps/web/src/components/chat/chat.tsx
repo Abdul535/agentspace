@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, PanelRightClose, PanelRightOpen } from "lucide-react";
+import { AlertCircle, PanelRightClose, PanelRightOpen, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ActivityPanel } from "@/components/chat/activity-panel";
@@ -100,6 +100,16 @@ export function Chat({ sessionId }: { sessionId: string }) {
               <AlertTitle>Couldn&apos;t send</AlertTitle>
               <AlertDescription>{run.error}</AlertDescription>
             </Alert>
+          )}
+          {/* The last run stopped (error, Stop, server restart) before the agent replied: offer to pick it up. */}
+          {!run.running && session.data?.can_continue && (
+            <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-sm">
+              <span className="text-muted-foreground">The agent stopped before it finished replying.</span>
+              <Button size="sm" variant="outline" onClick={run.resume}>
+                <RotateCw />
+                Continue
+              </Button>
+            </div>
           )}
           <Composer
             value={input}

@@ -24,6 +24,17 @@ export async function* streamPrompt(
   );
 }
 
+/** Continue the transcript as it is, with no new message (a retry); streams like `streamPrompt`. */
+export async function* streamContinue(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamEvent> {
+  yield* readEvents(
+    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/continue`, {
+      method: "POST",
+      headers: { accept: "text/event-stream" },
+      signal,
+    }),
+  );
+}
+
 /** Attach to a session's run: a `run_snapshot` first, then live events until the run ends. */
 export async function* watchRun(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamEvent> {
   yield* readEvents(

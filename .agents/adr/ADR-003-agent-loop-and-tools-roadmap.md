@@ -187,9 +187,25 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
     - A run that ends early (max turns, error, stop) leaves its queue unsent; the
       web client puts those messages back in the input box. Enter steers while a
       run is going, Alt+Enter queues a follow-up.
-15. [ ] **Continue.** Resume from a transcript that ends in a user or tool-result
+15. [x] **Continue.** Resume from a transcript that ends in a user or tool-result
     message without a new prompt, for retry after an error.
     *pi:* `agentLoopContinue`.
+    Built as follows:
+    - `run_loop` takes `prompt=None` to continue. `can_continue` checks the
+      transcript as the model would get it (`prepare_transcript`): a failed reply is
+      dropped and a tool call left without a result gets an error result, so a run
+      that errored, was stopped or was cut off mid-tool can continue. One that ends
+      in a finished assistant reply cannot: the model would answer itself.
+    - `POST /sessions/{id}/continue` streams like `POST .../messages`; 409 while a
+      run is going, 422 when there is nothing to continue. `GET /sessions/{id}`
+      gains `can_continue`, and the web app shows a Continue button when it is true.
+    - Crash recovery (deferred here by ADR-007) needs nothing more: a restart
+      leaves the transcript ending where the run stopped, and Continue picks it up.
+      No "run in flight" record is kept (opencode's approach); nothing resumes on
+      its own, the user decides.
+    - pi's `Agent.continue()` also delivers queued steering or follow-ups when the
+      transcript ends in a reply. Not needed here: queues live on an active run,
+      and continue only starts when none is active.
 
 ### Phase 4 — Context and models
 16. [ ] **Custom message types + `convert_to_llm`.** The transcript can hold

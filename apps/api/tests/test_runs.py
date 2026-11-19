@@ -249,3 +249,36 @@ def test_after_the_last_empty_follow_up_poll_the_run_refuses_new_messages() -> N
     assert asyncio.run(run.take_follow_ups()) == []
     # The loop is about to end, so a message queued now would never be sent: it gets a 409 instead.
     assert not run.queue("steer", UserMessage(content="too late"))
+
+
+def test_continue_after_a_stop_answers_the_prompt_without_adding_one(
+    client: TestClient, provider: GatedProvider
+) -> None:
+    session_id = client.post("/sessions", json={}).json()["id"]
+    url = f"/sessions/{session_id}"
+    assert client.post(f"{url}/continue").status_code == 422  # empty: nothing to answer
+    assert client.get(url).json()["can_continue"] is False
+
+    # Stopped mid-reply: the transcript ends with the prompt, still waiting for an answer.
+    post = in_background(lambda: client.post(f"{url}/messages", json={"content": "hi"}))
+    assert provider.waiting.wait(5)
+    assert client.post(f"{url}/continue").status_code == 409  # a run is going
+    assert client.post(f"{url}/abort").status_code == 204
+    post["thread"].join(5)
+    assert client.get(url).json()["can_continue"] is True
+
+    provider.waiting.clear()
+    cont = in_background(lambda: client.post(f"{url}/continue"))
+    assert provider.waiting.wait(5)
+    client.portal.call(provider.gate.set)
+    cont["thread"].join(5)
+
+    events = sse_events(cont["result"].text)
+    assert events[-1]["reason"] == "done"
+    assert [m["role"] for m in events[-1]["new_messages"]] == ["assistant"]  # no second "hi"
+    detail = client.get(url).json()
+    assert [m["role"] for m in detail["messages"]] == ["user", "assistant"]
+    # Answered now: continuing again would have the model reply to itself.
+    assert detail["can_continue"] is False
+    assert client.post(f"{url}/continue").status_code == 422
+    assert client.get(url).json()["running"] is False  # the refused claim gave its slot back

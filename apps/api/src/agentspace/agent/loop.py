@@ -7,6 +7,8 @@ messages go in before the next model call, and follow-ups restart a run that wou
 stop (ADR-003 step 14). The run ends after a batch in which every call set
 `terminate`, or when `finish_turn` says so; `max_turns` caps it either way.
 The loop holds no storage; callers persist messages from `message_end` events.
+With no prompt, it continues the transcript as it is (ADR-003 step 15), like pi's
+`agentLoopContinue`: a retry after an error, a stop or a crash.
 
 `run_loop` reports events through an `emit` callback, so any code holding it can
 report one (ADR-006). `run_agent` wraps it as an async generator for callers
@@ -47,7 +49,15 @@ from agentspace.agent.hooks import (
 )
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
 from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage, UserMessage
-from agentspace.ai.provider import Context, DoneEvent, ErrorEvent, Provider, TextDeltaEvent, ToolCallEndEvent
+from agentspace.ai.provider import (
+    Context,
+    DoneEvent,
+    ErrorEvent,
+    Provider,
+    TextDeltaEvent,
+    ToolCallEndEvent,
+    prepare_transcript,
+)
 
 # Tool result for calls in a reply the token limit cut off; their arguments may be incomplete.
 TRUNCATED_CALL = (
@@ -61,6 +71,18 @@ TRUNCATED_CALL = (
 type Emit = Callable[[AgentEvent], Awaitable[None]]
 
 
+def can_continue(history: Sequence[Message]) -> bool:
+    """Whether the model can be asked to reply to this transcript with no new message.
+
+    It can if what the model would see ends in a user message or a tool result: it still
+    owes a reply. Not if it ends in an assistant message: the model would answer itself.
+    Checked on the transcript as sent (`prepare_transcript`), where a failed reply is
+    dropped and a tool call cut off before its result gets an error result.
+    """
+    sent = prepare_transcript(list(history))
+    return bool(sent) and not isinstance(sent[-1], AssistantMessage)
+
+
 # TS: an `async function*` taking one options object (`*` = keyword-only); callers `for await` its events.
 async def run_agent(
     *,
@@ -69,13 +91,13 @@ async def run_agent(
     system_prompt: str,
     tools: Sequence[Tool],
     history: Sequence[Message],
-    prompt: UserMessage,
+    prompt: UserMessage | None,
     ctx: ToolContext,
     max_turns: int,
     max_tokens: int | None = None,
     config: LoopConfig | None = None,
 ) -> AsyncIterator[AgentEvent]:
-    """Run the agent on one prompt and yield its events: `run_loop` in a task, like pi's `agentLoop`."""
+    """Run the agent on one prompt (or continue, with None) and yield its events: `run_loop` in a task."""
     # None marks the end: the loop task finished and no more events are coming.
     queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
     loop_task = asyncio.create_task(
@@ -116,14 +138,20 @@ async def run_loop(
     system_prompt: str,
     tools: Sequence[Tool],
     history: Sequence[Message],
-    prompt: UserMessage,
+    prompt: UserMessage | None,
     ctx: ToolContext,
     max_turns: int,
     max_tokens: int | None = None,
     config: LoopConfig | None = None,
     emit: Emit,
 ) -> None:
-    """Run the agent on one prompt until it answers, fails or hits `max_turns`, passing each event to `emit`."""
+    """Run the agent until it answers, fails or hits `max_turns`, passing each event to `emit`.
+
+    With a `prompt`, the run starts by adding it. With None, it continues `history` as it is,
+    which must pass `can_continue` (pi's `agentLoopContinue`).
+    """
+    if prompt is None and not can_continue(history):
+        raise ValueError("Cannot continue: the transcript is empty or ends with the model's reply.")
     # TS: `or` here works like `??`: a LoopConfig is always truthy, so only None falls through.
     config = config or LoopConfig()
     messages: list[Message] = list(history)
@@ -146,9 +174,10 @@ async def run_loop(
         return await config.finish_turn(FinishTurnContext(turn, assistant, results, list(new_messages)))
 
     await emit(AgentStartEvent())
-    await emit(MessageStartEvent(message=prompt))
-    add(prompt)
-    await emit(MessageEndEvent(message=prompt))
+    if prompt is not None:
+        await emit(MessageStartEvent(message=prompt))
+        add(prompt)
+        await emit(MessageEndEvent(message=prompt))
 
     async def poll(get: GetMessages | None) -> list[Message]:
         """Queued messages from a hook, or none when the hook isn't set."""

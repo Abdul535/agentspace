@@ -76,6 +76,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions/{session_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Run
+         * @description Start a run on the transcript as it is, with no new message: a retry after an error, a stop or a crash.
+         *
+         *     Streams like `POST .../messages`. 409 if a run is going, 422 if the transcript
+         *     is empty or ends with the agent's reply (pi's `agentLoopContinue`).
+         */
+        post: operations["continue_run_sessions__session_id__continue_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -396,6 +419,8 @@ export interface components {
             running: boolean;
             /** Messages */
             messages: components["schemas"]["Message"][];
+            /** Can Continue */
+            can_continue: boolean;
         };
         /**
          * SessionPublic
@@ -821,6 +846,37 @@ export interface operations {
                 "application/json": components["schemas"]["PromptCreate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_run_sessions__session_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
