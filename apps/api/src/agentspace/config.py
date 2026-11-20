@@ -28,6 +28,9 @@ class Settings(BaseSettings):
         "You are a coding assistant. Help the user inspect files, run commands and change code in their workspace."
     )
     """The preamble of a new session's system prompt; tool, rules and workspace sections are added on each run."""
+    skills_dir: Path | None = None
+    """Skill folders (each with a `SKILL.md`) shared by every session, read-only to the model (ADR-016).
+    Defaults to `skills` in `data_dir`."""
     max_turns: int = 50
     max_output_tokens: int = 8192
     """Per model reply. Sent as `max_tokens`; raise it for long file writes."""
@@ -52,6 +55,11 @@ class Settings(BaseSettings):
     def resolved_database_url(self) -> str:
         """`database_url` if set, else the SQLite file in `data_dir`."""
         return self.database_url or f"sqlite+aiosqlite:///{self.data_dir / 'agentspace.db'}"
+
+    @property
+    def resolved_skills_dir(self) -> Path:
+        """`skills_dir` if set, else the `skills` folder in `data_dir`."""
+        return self.skills_dir or self.data_dir / "skills"
 
     @property
     def workspaces_dir(self) -> Path:

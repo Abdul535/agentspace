@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
 from agentspace.ai.images import ImageError, process_image, sniff_image
 from agentspace.ai.messages import TextContent
-from agentspace.tools.paths import resolve_in_workspace
+from agentspace.tools.paths import resolve_readable
 
 # Output caps per call, so one read can't flood the model's context; whichever is hit first wins.
 MAX_LINES = 2000
@@ -44,7 +44,7 @@ class ReadTool(Tool[ReadParams]):
 
     async def execute(self, args: ReadParams, ctx: ToolContext) -> ToolResult:
         """Read the file off the event loop."""
-        path = resolve_in_workspace(ctx.workspace, args.path)
+        path = resolve_readable(ctx.workspace, ctx.read_roots, args.path)
         # TS: the file I/O below blocks (like fs.readFileSync); asyncify runs it on a worker thread and awaits it.
         return await asyncify(read_file)(path, args.path, args.offset, args.limit)
 

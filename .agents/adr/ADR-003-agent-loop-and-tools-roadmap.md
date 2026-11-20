@@ -247,8 +247,10 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
 22. [ ] **Changing tools mid-session.** Announce tools added or removed to the
     model through a system message, so the transcript replays the right tool set.
     *pi:* `declareToolChanges`.
-23. [ ] **Skills.** Load skill folders (`SKILL.md`) and list them in the system
+    Skipped (2026-11-21): not needed now.
+23. [x] **Skills.** Load skill folders (`SKILL.md`) and list them in the system
     prompt, and let the model read one on demand. *pi:* `core/skills.ts`.
+    Done (2026-11-21): ADR-016.
 24. [ ] **MCP tools.** Turn an MCP server's tools into `Tool`s.
     *pi:* `packages/mcp`, `extensions/mcp/tools.ts`.
 25. [ ] **Branching.** Fork a session from any message using the existing

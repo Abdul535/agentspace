@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.api.models import router as models_router
 from agentspace.api.sessions import router as sessions_router
+from agentspace.api.skills import router as skills_router
 from agentspace.config import Settings, get_settings
 from agentspace.runs import RunManager
 from agentspace.session.db import create_engine, session_factory
@@ -40,6 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="agentspace", lifespan=lifespan)
     app.include_router(sessions_router)
     app.include_router(models_router)
+    app.include_router(skills_router)
     return app
 
 

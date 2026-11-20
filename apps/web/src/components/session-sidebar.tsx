@@ -1,7 +1,8 @@
 "use client";
 
+import { BookOpen } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 
 import { NewSessionButton } from "@/components/new-session-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 export function SessionSidebar() {
   const { id: activeId } = useParams<{ id?: string }>();
+  const onSkills = usePathname().startsWith("/skills");
   const sessions = useSessions();
 
   return (
@@ -37,6 +39,17 @@ export function SessionSidebar() {
           </Link>
         ))}
       </nav>
+      <Link
+        href="/skills"
+        aria-current={onSkills ? "page" : undefined}
+        className={cn(
+          "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+          "aria-[current=page]:bg-muted aria-[current=page]:text-foreground",
+        )}
+      >
+        <BookOpen className="size-4" strokeWidth={1.5} />
+        Skills
+      </Link>
     </aside>
   );
 }
