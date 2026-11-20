@@ -10,6 +10,7 @@ import {
   type SessionDetail,
   type ThinkingLevel,
 } from "./client";
+import { mcpAdminHeaders } from "./mcp-admin-token";
 
 export const queryKeys = {
   sessions: ["sessions"] as const,
@@ -153,7 +154,7 @@ export function useCreateMcpServer() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body: McpServerCreate) => {
-      const { data, error } = await api.POST("/mcp-servers", { body });
+      const { data, error } = await api.POST("/mcp-servers", { body, headers: mcpAdminHeaders() });
       if (error) throw new Error(errorMessage(error));
       return data;
     },
@@ -169,6 +170,7 @@ export function useUpdateMcpServer() {
       const { data, error } = await api.PATCH("/mcp-servers/{server_id}", {
         params: { path: { server_id: id } },
         body: change,
+        headers: mcpAdminHeaders(),
       });
       if (error) throw new Error(errorMessage(error));
       return data;
@@ -182,7 +184,10 @@ export function useDeleteMcpServer() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await api.DELETE("/mcp-servers/{server_id}", { params: { path: { server_id: id } } });
+      const { error } = await api.DELETE("/mcp-servers/{server_id}", {
+        params: { path: { server_id: id } },
+        headers: mcpAdminHeaders(),
+      });
       if (error) throw new Error(errorMessage(error));
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers }),
@@ -195,6 +200,7 @@ export function useTestMcpServer() {
     mutationFn: async (id: string) => {
       const { data, error } = await api.POST("/mcp-servers/{server_id}/test", {
         params: { path: { server_id: id } },
+        headers: mcpAdminHeaders(),
       });
       if (error) throw new Error(errorMessage(error));
       return data;

@@ -779,7 +779,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ]
       }
     },
     "/mcp-servers/{server_id}": {
@@ -790,6 +795,11 @@
         "summary": "Update Server",
         "description": "Change a server; its running processes stop now and start again with the new settings when next needed.",
         "operationId": "update_server_mcp_servers__server_id__patch",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "server_id",
@@ -841,6 +851,11 @@
         "summary": "Delete Server",
         "description": "Delete a server and stop its processes.",
         "operationId": "delete_server_mcp_servers__server_id__delete",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "server_id",
@@ -877,6 +892,11 @@
         "summary": "Test Server",
         "description": "Start the server once, list its tools and stop it. A failure is a result with `ok: false`, not an HTTP error.\n\n403 while MCP is off, since this runs the server's command on the host.",
         "operationId": "test_server_mcp_servers__server_id__test_post",
+        "security": [
+          {
+            "APIKeyHeader": []
+          }
+        ],
         "parameters": [
           {
             "name": "server_id",
@@ -1323,6 +1343,10 @@
             "type": "boolean",
             "title": "Mcp Enabled"
           },
+          "admin_token_set": {
+            "type": "boolean",
+            "title": "Admin Token Set"
+          },
           "servers": {
             "items": {
               "$ref": "#/components/schemas/McpServerPublic"
@@ -1334,6 +1358,7 @@
         "type": "object",
         "required": [
           "mcp_enabled",
+          "admin_token_set",
           "servers"
         ],
         "title": "McpServerList",
@@ -2744,6 +2769,13 @@
           "type"
         ],
         "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "APIKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-MCP-Admin-Token"
       }
     }
   }

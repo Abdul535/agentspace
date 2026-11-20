@@ -89,9 +89,15 @@ here when it lands.
      off, servers can still be saved, but the test route answers 403 and runs
      get no MCP tools. A server inherits only `HOME`, `PATH`, `USER`,
      `LOGNAME`, `SHELL`, `TERM`, `LANG` and `TMPDIR` from the API, plus its
-     own `env`, so the API's keys never reach it. Env values are stored in
-     plain text in the database and shown to anyone who can reach the API.
-     That is acceptable only until step 27 (API auth).
+     own `env`, so the API's keys never reach it.
+   - **Admin token.** Adding, changing, deleting or testing a server needs the
+     `X-MCP-Admin-Token` header to match `AGENTSPACE_MCP_ADMIN_TOKEN`. While no
+     token is set, those routes answer 403 for everyone. Without this, anyone
+     who can reach the API could save a command and run it through the test
+     route. The web page asks for the token and keeps it in the browser's
+     local storage. Listing servers stays open, so env values are still shown
+     in plain text to anyone who can reach the API (stage 8); step 27 (API
+     auth) will replace this token with real logins.
    Built as follows: `agentspace/mcp/` (`client.py`, `tools.py`,
    `manager.py`), `api/mcp_servers.py`, the `mcp_servers` table, the settings
    `enable_mcp`, `mcp_wait_seconds`, `mcp_call_timeout_seconds` and

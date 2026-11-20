@@ -18,6 +18,7 @@ from agentspace.mcp.client import CallToolResult, McpError, StdioClient
 from agentspace.mcp.manager import McpManager, ServerConfig
 from agentspace.mcp.tools import McpArgs, McpTool, convert_result, cut_middle, mcp_tool_name
 
+ADMIN_TOKEN = "test-admin-token"
 FAKE_SERVER = str(Path(__file__).parent / "fixtures" / "fake_mcp_server.py")
 # The test's own Python runs the fake server, so it works without anything installed.
 PYTHON = sys.executable
@@ -181,9 +182,10 @@ def fake() -> FakeProvider:
 
 @pytest.fixture
 def client(tmp_path: Path, fake: FakeProvider) -> Iterator[TestClient]:
-    app = create_app(Settings(_env_file=None, data_dir=tmp_path, enable_mcp=True))
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, enable_mcp=True, mcp_admin_token=ADMIN_TOKEN))
     app.dependency_overrides[provider_lookup] = lambda: lambda name: fake
-    with TestClient(app) as client:
+    # The settings page sends the admin token on every change; these tests act as that page.
+    with TestClient(app, headers={"X-MCP-Admin-Token": ADMIN_TOKEN}) as client:
         yield client
 
 
@@ -216,7 +218,8 @@ def test_servers_can_be_added_changed_tested_and_deleted(client: TestClient) -> 
 
 
 def test_testing_a_server_is_refused_while_mcp_is_off(tmp_path: Path) -> None:
-    with TestClient(create_app(Settings(_env_file=None, data_dir=tmp_path))) as client:
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, mcp_admin_token=ADMIN_TOKEN))
+    with TestClient(app, headers={"X-MCP-Admin-Token": ADMIN_TOKEN}) as client:
         server = client.post("/mcp-servers", json={"name": "fake", "command": PYTHON, "args": [FAKE_SERVER]}).json()
         assert client.get("/mcp-servers").json()["mcp_enabled"] is False
         assert client.post(f"/mcp-servers/{server['id']}/test").status_code == 403
@@ -248,3 +251,30 @@ def test_a_read_only_session_gets_no_mcp_tools(client: TestClient, fake: FakePro
     fake.replies = [text_reply("ok")]
     client.post(f"/sessions/{session_id}/messages", json={"content": "hi"})
     assert [t.name for t in fake.contexts[0].tools] == ["read", "grep", "find", "ls"]
+
+
+def test_saving_or_starting_a_command_needs_the_admin_token(tmp_path: Path) -> None:
+    body = {"name": "fake", "command": PYTHON, "args": [FAKE_SERVER]}
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, enable_mcp=True, mcp_admin_token=ADMIN_TOKEN))
+    with TestClient(app) as client:
+        # No token, or a wrong one: nothing is saved and nothing starts.
+        assert client.post("/mcp-servers", json=body).status_code == 401
+        wrong = {"X-MCP-Admin-Token": "guess"}
+        assert client.post("/mcp-servers", json=body, headers=wrong).status_code == 401
+        assert client.get("/mcp-servers").json()["servers"] == []
+
+        admin = {"X-MCP-Admin-Token": ADMIN_TOKEN}
+        server_id = client.post("/mcp-servers", json=body, headers=admin).json()["id"]
+        url = f"/mcp-servers/{server_id}"
+        assert client.post(f"{url}/test").status_code == 401
+        assert client.patch(url, json={"command": "sh"}, headers=wrong).status_code == 401
+        assert client.delete(url).status_code == 401
+        assert client.post(f"{url}/test", headers=admin).json()["ok"] is True
+
+
+def test_without_an_admin_token_configured_no_one_can_change_servers(tmp_path: Path) -> None:
+    app = create_app(Settings(_env_file=None, data_dir=tmp_path, enable_mcp=True))
+    with TestClient(app, headers={"X-MCP-Admin-Token": ""}) as client:
+        created = client.post("/mcp-servers", json={"name": "fake", "command": PYTHON, "args": [FAKE_SERVER]})
+        assert created.status_code == 403 and "AGENTSPACE_MCP_ADMIN_TOKEN" in created.json()["detail"]
+        assert client.get("/mcp-servers").json()["admin_token_set"] is False

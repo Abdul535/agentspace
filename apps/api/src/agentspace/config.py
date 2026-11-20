@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     """Give sessions the `bash` tool. Off by default: commands run unsandboxed as the API's user (ADR-003)."""
     enable_mcp: bool = False
     """Start the saved MCP servers. Off by default: each one runs a command on the host (ADR-017)."""
+    mcp_admin_token: str | None = None
+    """Secret the web page must send to add, change, delete or test MCP servers; those routes refuse all while unset."""
     mcp_wait_seconds: float = 10
     """How long a run waits for its MCP servers to connect before going on without the slow ones."""
     mcp_call_timeout_seconds: float = 60

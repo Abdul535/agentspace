@@ -532,6 +532,8 @@ export interface components {
         McpServerList: {
             /** Mcp Enabled */
             mcp_enabled: boolean;
+            /** Admin Token Set */
+            admin_token_set: boolean;
             /** Servers */
             servers: components["schemas"]["McpServerPublic"][];
         };

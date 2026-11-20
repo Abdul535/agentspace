@@ -1,10 +1,12 @@
 """HTTP routes for the MCP servers on the settings page: list, add, change, delete and test (ADR-017)."""
 
 import asyncio
+import secrets
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from sqlmodel import col, select
 
@@ -26,6 +28,26 @@ def get_mcp(request: Request) -> McpManager:
 
 
 McpDep = Annotated[McpManager, Depends(get_mcp)]
+
+# Read by hand below (auto_error=False), so a missing header gets our own message.
+admin_token_header = APIKeyHeader(name="X-MCP-Admin-Token", auto_error=False)
+
+
+def require_mcp_admin(settings: SettingsDep, token: Annotated[str | None, Security(admin_token_header)] = None) -> None:
+    """Only callers with the admin token may save or start a command: these routes run programs on the host."""
+    expected = settings.mcp_admin_token
+    if not expected:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Set AGENTSPACE_MCP_ADMIN_TOKEN on the API to add, change or test MCP servers.",
+        )
+    # compare_digest takes the same time however much of the token matches, so timing can't reveal it.
+    if token is None or not secrets.compare_digest(token.encode(), expected.encode()):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Wrong or missing MCP admin token.")
+
+
+# Added to every route that saves, changes or starts a command.
+AdminOnly = [Depends(require_mcp_admin)]
 
 
 class McpServerCreate(BaseModel):
@@ -66,6 +88,8 @@ class McpServerList(BaseModel):
 
     mcp_enabled: bool
     """False until `AGENTSPACE_ENABLE_MCP=true`; servers can be saved but not tested or used."""
+    admin_token_set: bool
+    """Whether `AGENTSPACE_MCP_ADMIN_TOKEN` is set; without it no one can add, change or test servers."""
     servers: list[McpServerPublic]
 
 
@@ -133,10 +157,12 @@ async def list_servers(db: DBDep, settings: SettingsDep) -> McpServerList:
     """Every saved server, by name."""
     rows = await db.exec(select(McpServerRow).order_by(col(McpServerRow.name)))
     servers = [McpServerPublic.model_validate(row, from_attributes=True) for row in rows]
-    return McpServerList(mcp_enabled=settings.enable_mcp, servers=servers)
+    return McpServerList(
+        mcp_enabled=settings.enable_mcp, admin_token_set=bool(settings.mcp_admin_token), servers=servers
+    )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=AdminOnly)
 async def create_server(body: McpServerCreate, db: DBDep) -> McpServerPublic:
     """Save a server; 409 if its name is taken. Sessions pick it up on their next message."""
     await check_name_free(db, body.name)
@@ -147,7 +173,7 @@ async def create_server(body: McpServerCreate, db: DBDep) -> McpServerPublic:
     return McpServerPublic.model_validate(row, from_attributes=True)
 
 
-@router.patch("/{server_id}")
+@router.patch("/{server_id}", dependencies=AdminOnly)
 async def update_server(body: McpServerUpdate, row: ServerRowDep, db: DBDep, mcp: McpDep) -> McpServerPublic:
     """Change a server; its running processes stop now and start again with the new settings when next needed."""
     if body.name is not None:
@@ -163,7 +189,7 @@ async def update_server(body: McpServerUpdate, row: ServerRowDep, db: DBDep, mcp
     return McpServerPublic.model_validate(row, from_attributes=True)
 
 
-@router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=AdminOnly)
 async def delete_server(row: ServerRowDep, db: DBDep, mcp: McpDep) -> None:
     """Delete a server and stop its processes."""
     await db.delete(row)
@@ -171,7 +197,7 @@ async def delete_server(row: ServerRowDep, db: DBDep, mcp: McpDep) -> None:
     await mcp.close_server(row.id)
 
 
-@router.post("/{server_id}/test")
+@router.post("/{server_id}/test", dependencies=AdminOnly)
 async def test_server(row: ServerRowDep, settings: SettingsDep) -> McpServerTest:
     """Start the server once, list its tools and stop it. A failure is a result with `ok: false`, not an HTTP error.
 

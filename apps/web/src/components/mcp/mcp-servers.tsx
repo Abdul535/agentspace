@@ -1,14 +1,17 @@
 "use client";
 
-import { CircleCheck, CircleX, Loader2, Pencil, Plug, Plus, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { CircleCheck, CircleX, KeyRound, Loader2, Pencil, Plug, Plus, Trash2 } from "lucide-react";
+import { useState, useSyncExternalStore } from "react";
 
 import { McpServerForm } from "@/components/mcp/mcp-server-form";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import type { McpServer, McpServerCreate } from "@/lib/api/client";
+import { getMcpAdminToken, setMcpAdminToken, subscribeMcpAdminToken } from "@/lib/api/mcp-admin-token";
 import {
   useCreateMcpServer,
   useDeleteMcpServer,
@@ -64,6 +67,18 @@ export function McpServers() {
           </AlertDescription>
         </Alert>
       )}
+
+      {servers.data && !servers.data.admin_token_set && (
+        <Alert>
+          <AlertTitle>No admin token</AlertTitle>
+          <AlertDescription className="text-pretty">
+            Adding, changing or testing a server needs a secret only you know. Set{" "}
+            <code className="font-mono">AGENTSPACE_MCP_ADMIN_TOKEN</code> in <code className="font-mono">apps/api/.env</code>,
+            restart the API, then enter it below.
+          </AlertDescription>
+        </Alert>
+      )}
+      {servers.data?.admin_token_set && <AdminTokenField />}
 
       {servers.isPending && <Skeleton className="h-24 w-full" />}
       {servers.isError && <p className="text-sm text-destructive">Can&apos;t load MCP servers.</p>}
@@ -197,4 +212,47 @@ function TestResult({ result }: { result: NonNullable<ReturnType<typeof useTestM
 // The command as one line, for display only (the API never runs it through a shell).
 function commandLine(server: McpServer): string {
   return [server.command, ...server.args].join(" ");
+}
+
+// Where the user enters the API's MCP admin token; it is kept in this browser and sent with every change.
+function AdminTokenField() {
+  // Read on the client only: the server render has no storage, so it starts as "" there.
+  const saved = useSyncExternalStore(subscribeMcpAdminToken, getMcpAdminToken, () => "");
+  const [draft, setDraft] = useState("");
+
+  function save(event: React.FormEvent) {
+    event.preventDefault();
+    setMcpAdminToken(draft.trim());
+    setDraft("");
+  }
+
+  return (
+    <form onSubmit={save} className="flex flex-col gap-1.5">
+      <Label htmlFor="mcp-admin-token" className="flex items-center gap-1.5">
+        <KeyRound className="size-4" strokeWidth={1.5} />
+        Admin token
+      </Label>
+      <div className="flex gap-2">
+        <Input
+          id="mcp-admin-token"
+          type="password"
+          autoComplete="off"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={saved ? "Saved in this browser" : "The value of AGENTSPACE_MCP_ADMIN_TOKEN"}
+        />
+        <Button type="submit" variant="outline" disabled={!draft.trim()}>
+          Save
+        </Button>
+        {saved && (
+          <Button type="button" variant="ghost" onClick={() => setMcpAdminToken("")}>
+            Forget
+          </Button>
+        )}
+      </div>
+      <p className="text-xs text-pretty text-muted-foreground">
+        Needed to add, change, delete or test servers, since those run commands on the API&apos;s machine.
+      </p>
+    </form>
+  );
 }
