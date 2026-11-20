@@ -101,6 +101,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/sessions/{session_id}/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compact Session
+         * @description Summarize the older part of the transcript now (ADR-009); streams the run's events like `.../continue`.
+         *
+         *     409 if a run is going, 422 if the conversation is too short to compact.
+         */
+        post: operations["compact_session_sessions__session_id__compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/sessions/{session_id}/events": {
         parameters: {
             query?: never;
@@ -221,8 +243,8 @@ export interface components {
             /** New Messages */
             new_messages: components["schemas"]["AgentMessage"][];
         };
-        AgentEvent: components["schemas"]["AgentStartEvent"] | components["schemas"]["TurnStartEvent"] | components["schemas"]["MessageStartEvent"] | components["schemas"]["MessageUpdateEvent"] | components["schemas"]["MessageEndEvent"] | components["schemas"]["ToolExecutionStartEvent"] | components["schemas"]["ToolExecutionUpdateEvent"] | components["schemas"]["ToolExecutionEndEvent"] | components["schemas"]["TurnEndEvent"] | components["schemas"]["AgentEndEvent"];
-        AgentMessage: components["schemas"]["UserMessage"] | components["schemas"]["AssistantMessage"] | components["schemas"]["ToolResultMessage"] | components["schemas"]["NoticeMessage"];
+        AgentEvent: components["schemas"]["AgentStartEvent"] | components["schemas"]["TurnStartEvent"] | components["schemas"]["MessageStartEvent"] | components["schemas"]["MessageUpdateEvent"] | components["schemas"]["MessageEndEvent"] | components["schemas"]["ToolExecutionStartEvent"] | components["schemas"]["ToolExecutionUpdateEvent"] | components["schemas"]["ToolExecutionEndEvent"] | components["schemas"]["TurnEndEvent"] | components["schemas"]["AgentEndEvent"] | components["schemas"]["CompactionStartEvent"] | components["schemas"]["CompactionEndEvent"];
+        AgentMessage: components["schemas"]["UserMessage"] | components["schemas"]["AssistantMessage"] | components["schemas"]["ToolResultMessage"] | components["schemas"]["NoticeMessage"] | components["schemas"]["CompactionSummaryMessage"];
         /**
          * AgentStartEvent
          * @description A run started.
@@ -265,6 +287,53 @@ export interface components {
             stop_reason: components["schemas"]["StopReason"];
             /** Error Message */
             error_message?: string | null;
+            /** Timestamp */
+            timestamp?: number;
+        };
+        /**
+         * CompactionEndEvent
+         * @description Compaction finished; on success its summary already came as a `message_end`.
+         */
+        CompactionEndEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "compaction_end";
+            reason: components["schemas"]["CompactionReason"];
+            /** Error */
+            error?: string | null;
+        };
+        /** @enum {string} */
+        CompactionReason: "threshold" | "overflow" | "manual";
+        /**
+         * CompactionStartEvent
+         * @description The run started summarizing the older part of the transcript.
+         */
+        CompactionStartEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "compaction_start";
+            reason: components["schemas"]["CompactionReason"];
+        };
+        /**
+         * CompactionSummaryMessage
+         * @description A summary standing in for the older part of the transcript, so it fits the model's window (ADR-009).
+         */
+        CompactionSummaryMessage: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            role: "compaction_summary";
+            /** Summary */
+            summary: string;
+            /** Kept */
+            kept: number;
+            /** Tokens Before */
+            tokens_before: number;
             /** Timestamp */
             timestamp?: number;
         };
@@ -885,6 +954,37 @@ export interface operations {
         };
     };
     continue_run_sessions__session_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compact_session_sessions__session_id__compact_post: {
         parameters: {
             query?: never;
             header?: never;

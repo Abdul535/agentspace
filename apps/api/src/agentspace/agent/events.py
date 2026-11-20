@@ -11,6 +11,10 @@ Sequence for one prompt (modeled on pi's `packages/agent` event flow):
     turn_end
     ...more turns while the assistant calls tools...
     agent_end
+    compaction_start · message_start/end (compaction_summary) · compaction_end      when compacting (ADR-009)
+
+Compaction runs inside the run, after `agent_end` (threshold), before a retry that
+adds a second `agent_start`…`agent_end` (overflow), or alone (manual).
 """
 
 from typing import Annotated, Any, Literal
@@ -25,6 +29,9 @@ from agentspace.ai.provider import TextDeltaEvent, ToolCallEndEvent
 # Why a run stopped: the model answered, it hit max_turns, the provider failed, it was cancelled,
 # every tool call in the last batch asked to stop (`ToolResult.terminate`), or `finish_turn` returned "end".
 type EndReason = Literal["done", "max_turns", "error", "aborted", "terminated", "finish_turn"]
+
+# Why the run compacted: the context neared the window, the provider refused it as too long, or the user asked.
+type CompactionReason = Literal["threshold", "overflow", "manual"]
 
 
 # TS: each event is a Pydantic model (zod schema + type); `type: Literal["x"]` is the tag, like `type: "x"`.
@@ -104,6 +111,22 @@ class AgentEndEvent(BaseModel):
     new_messages: list[AgentMessage]
 
 
+class CompactionStartEvent(BaseModel):
+    """The run started summarizing the older part of the transcript."""
+
+    type: Literal["compaction_start"] = "compaction_start"
+    reason: CompactionReason
+
+
+class CompactionEndEvent(BaseModel):
+    """Compaction finished; on success its summary already came as a `message_end`."""
+
+    type: Literal["compaction_end"] = "compaction_end"
+    reason: CompactionReason
+    error: str | None = None
+    """Why no summary was saved, if it failed."""
+
+
 # Any agent event; `type` tells them apart. This is what the API streams to clients.
 # TS: type AgentEvent = AgentStartEvent | TurnStartEvent | ..., a discriminated union on `type`.
 type AgentEvent = Annotated[
@@ -116,6 +139,8 @@ type AgentEvent = Annotated[
     | ToolExecutionUpdateEvent
     | ToolExecutionEndEvent
     | TurnEndEvent
-    | AgentEndEvent,
+    | AgentEndEvent
+    | CompactionStartEvent
+    | CompactionEndEvent,
     Field(discriminator="type"),
 ]

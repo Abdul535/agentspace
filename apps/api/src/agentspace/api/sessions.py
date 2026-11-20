@@ -1,22 +1,25 @@
-"""HTTP routes for sessions: create, list, read, switch model, prompt or continue, watch, steer or stop a run."""
+"""HTTP routes for sessions: create, list, read, switch model, prompt, continue, compact, watch, steer or stop."""
 
-from collections.abc import AsyncIterable, AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 
-from agentspace.agent.events import AgentEvent
+from agentspace.agent.compaction import build_context, can_compact, compact, context_tokens
+from agentspace.agent.events import AgentEndEvent, AgentEvent, AgentStartEvent
 from agentspace.agent.hooks import LoopConfig
 from agentspace.agent.loop import Emit, can_continue, run_loop
 from agentspace.agent.messages import AgentMessage, NoticeMessage
 from agentspace.agent.prompt import build_system_prompt
 from agentspace.agent.tool import ToolContext
-from agentspace.ai.messages import UserMessage
+from agentspace.ai.catalog import CatalogError, OpenRouterCatalog
+from agentspace.ai.messages import AssistantMessage, UserMessage
+from agentspace.ai.overflow import is_context_overflow
 from agentspace.ai.providers import PROVIDERS
-from agentspace.api.deps import Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
+from agentspace.api.deps import CatalogDep, Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
 from agentspace.config import Settings
 from agentspace.runs import QueueKind, RunManager, RunSnapshot, read_events
 from agentspace.session.models import SessionRow
@@ -113,7 +116,9 @@ async def get_session(session: SessionRowDep, store: StoreDep, runs: RunsDep) ->
     """One session and its saved transcript; while it runs, `GET .../events` also has the reply in progress."""
     # TS: `**dict` spreads keyword arguments: new SessionDetail({ ...public, messages }).
     messages = await store.messages(session.id)
-    return SessionDetail(**public(session, runs).model_dump(), messages=messages, can_continue=can_continue(messages))
+    return SessionDetail(
+        **public(session, runs).model_dump(), messages=messages, can_continue=can_continue(build_context(messages))
+    )
 
 
 @router.patch("/{session_id}")
@@ -143,7 +148,7 @@ def no_transform(response: Response) -> None:
 
 @router.post("/{session_id}/messages", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
 async def send_message(
-    body: PromptCreate, run: RunDep, store: StoreDep, settings: SettingsDep, runs: RunsDep
+    body: PromptCreate, run: RunDep, store: StoreDep, settings: SettingsDep, runs: RunsDep, catalog: CatalogDep
 ) -> AsyncIterable[AgentEvent]:
     """Start a run on a new user message and stream its events as SSE.
 
@@ -154,13 +159,14 @@ async def send_message(
     # Untitled sessions take their title from the first prompt.
     if run.session.title is None:
         await store.set_title(run.session, body.content[:80])
-    async for event in stream_run(run, UserMessage(content=body.content), settings, runs):
+    async for event in stream_run(run, UserMessage(content=body.content), settings, runs, context_window(run, catalog)):
         yield event
 
 
 def continuable(run: RunDep) -> Run:
     """The claimed run, if its transcript can be continued; 422 otherwise (the slot is then given back)."""
-    if not can_continue(run.active.messages):
+    # Judged on what the model reads: a compacted transcript starts at its latest summary.
+    if not can_continue(build_context(run.active.messages)):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
             "Nothing to continue: the transcript is empty or already ends with the agent's reply.",
@@ -170,36 +176,96 @@ def continuable(run: RunDep) -> Run:
 
 @router.post("/{session_id}/continue", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
 async def continue_run(
-    run: Annotated[Run, Depends(continuable)], settings: SettingsDep, runs: RunsDep
+    run: Annotated[Run, Depends(continuable)], settings: SettingsDep, runs: RunsDep, catalog: CatalogDep
 ) -> AsyncIterable[AgentEvent]:
     """Start a run on the transcript as it is, with no new message: a retry after an error, a stop or a crash.
 
     Streams like `POST .../messages`. 409 if a run is going, 422 if the transcript
     is empty or ends with the agent's reply (pi's `agentLoopContinue`).
     """
-    async for event in stream_run(run, None, settings, runs):
+    async for event in stream_run(run, None, settings, runs, context_window(run, catalog)):
         yield event
 
 
+def compactable(run: RunDep, settings: SettingsDep) -> Run:
+    """The claimed run, if its transcript has an older part to summarize; 422 otherwise."""
+    if not can_compact(run.active.messages, settings.compaction_keep_recent_tokens):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Nothing to compact: the conversation still fits in what compaction keeps as it is.",
+        )
+    return run
+
+
+@router.post("/{session_id}/compact", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
+async def compact_session(
+    run: Annotated[Run, Depends(compactable)], settings: SettingsDep, runs: RunsDep
+) -> AsyncIterable[AgentEvent]:
+    """Summarize the older part of the transcript now (ADR-009); streams the run's events like `.../continue`.
+
+    409 if a run is going, 422 if the conversation is too short to compact.
+    """
+
+    async def loop(emit: Emit) -> None:
+        """A run that only compacts, framed by `agent_start`/`agent_end` like any other run."""
+        await emit(AgentStartEvent())
+        saved = await compact(
+            run.active.messages[:],
+            provider=run.provider,
+            model=run.session.model,
+            keep_recent_tokens=settings.compaction_keep_recent_tokens,
+            max_tokens=settings.max_output_tokens,
+            reason="manual",
+            emit=emit,
+        )
+        new = run.active.messages[-1:] if saved else []
+        await emit(AgentEndEvent(reason="done" if saved else "error", new_messages=new))
+
+    queue = runs.start(run.active, loop)
+    async for event in read_events(run.active, queue):
+        yield event
+
+
+# Looks up the session model's context window when the run needs it; None when the catalog doesn't know.
+type ContextWindow = Callable[[], Awaitable[int | None]]
+
+
+def context_window(run: Run, catalog: OpenRouterCatalog) -> ContextWindow:
+    """How the run finds its model's window: from the model catalog (ADR-005), fetched only if asked."""
+
+    async def lookup() -> int | None:
+        """The window in tokens, or None if the catalog can't be reached or doesn't list the model."""
+        try:
+            models = await catalog.models()
+        except CatalogError:
+            return None
+        return next((m.context_length for m in models if m.id == run.session.model), None)
+
+    return lookup
+
+
 async def stream_run(
-    run: Run, prompt: UserMessage | None, settings: Settings, runs: RunManager
+    run: Run, prompt: UserMessage | None, settings: Settings, runs: RunManager, window: ContextWindow
 ) -> AsyncIterator[AgentEvent]:
-    """Start the claimed run in the background, on a prompt or continuing, and yield its events to this client."""
+    """Start the claimed run in the background, on a prompt or continuing, and yield its events to this client.
+
+    After the loop, the run compacts if the context neared the window, or compacts and
+    retries once if the provider refused it as too long (ADR-009).
+    """
     session = run.session
     run.workspace.mkdir(parents=True, exist_ok=True)
     tools = build_tools(session.tools, bash=settings.enable_bash)
     system_prompt = build_system_prompt(session.system_prompt, tools)
-    history = run.active.messages[:]  # a copy: the run appends to its own list as messages finish
 
-    # TS: an inner function closing over this request's values; the manager calls it with its own `emit`.
-    async def loop(emit: Emit) -> None:
-        """This run's agent loop."""
+    async def agent(emit: Emit, prompt: UserMessage | None) -> None:
+        """One pass of the agent loop over what the model reads of the transcript so far."""
         await run_loop(
             provider=run.provider,
             model=session.model,
             system_prompt=system_prompt,
             tools=tools,
-            history=history,
+            # A copy: the run appends to its own list as messages finish.
+            history=build_context(run.active.messages),
             prompt=prompt,
             ctx=ToolContext(workspace=run.workspace),
             max_turns=settings.max_turns,
@@ -211,6 +277,42 @@ async def stream_run(
             ),
             emit=emit,
         )
+
+    async def compact_now(emit: Emit, reason: Literal["threshold", "overflow"]) -> bool:
+        """Summarize the older part of the transcript; False if it failed or there was nothing to summarize."""
+        return await compact(
+            run.active.messages[:],
+            provider=run.provider,
+            model=session.model,
+            keep_recent_tokens=settings.compaction_keep_recent_tokens,
+            max_tokens=settings.max_output_tokens,
+            reason=reason,
+            emit=emit,
+        )
+
+    async def over_threshold() -> bool:
+        """Whether the context is within the reserve of the model's window, with an older part to summarize."""
+        # Checked first, so a short session never needs the catalog.
+        if not can_compact(run.active.messages, settings.compaction_keep_recent_tokens):
+            return False
+        limit = await window()
+        tokens = context_tokens(build_context(run.active.messages))
+        return limit is not None and tokens > limit - settings.compaction_reserve_tokens
+
+    # TS: an inner function closing over this request's values; the manager calls it with its own `emit`.
+    async def loop(emit: Emit) -> None:
+        """This run: the agent loop, then compaction if the context needs it."""
+        await agent(emit, prompt)
+        if not settings.compaction_enabled:
+            return
+        last = run.active.messages[-1] if run.active.messages else None
+        if isinstance(last, AssistantMessage) and is_context_overflow(last):
+            # Once only: if the retry overflows too, compacting again won't make room, so the error stands.
+            if await compact_now(emit, "overflow"):
+                await agent(emit, None)
+            return
+        if await over_threshold():
+            await compact_now(emit, "threshold")
 
     queue = runs.start(run.active, loop)
     # TS: each `yield` sends one SSE event to the client the moment it happens.

@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     max_turns: int = 50
     max_output_tokens: int = 8192
     """Per model reply. Sent as `max_tokens`; raise it for long file writes."""
+    compaction_enabled: bool = True
+    """Summarize the older part of a session when its context nears the model's window (ADR-009)."""
+    compaction_reserve_tokens: int = 16384
+    """Compact once the context is within this many tokens of the window, leaving room for the next reply."""
+    compaction_keep_recent_tokens: int = 20000
+    """About how many tokens of the newest messages compaction keeps as they are."""
     default_tool_set: ToolSetName = "all"
     """Tool preset for sessions created without one: `all`, `coding` or `read_only`."""
     enable_bash: bool = False

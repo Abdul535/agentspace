@@ -936,7 +936,13 @@ async def test_the_model_gets_what_convert_to_llm_returns(tmp_path: Path) -> Non
     def notices_as_user_messages(messages: list[AgentMessage]) -> list[Message]:
         """A converter that rewrites notices instead of dropping them."""
         seen.append([m.role for m in messages])
-        return [UserMessage(content=f"[{m.text}]") if isinstance(m, NoticeMessage) else m for m in messages]
+        out: list[Message] = []
+        for m in messages:
+            if isinstance(m, NoticeMessage):
+                out.append(UserMessage(content=f"[{m.text}]"))
+            elif isinstance(m, UserMessage | AssistantMessage | ToolResultMessage):
+                out.append(m)
+        return out
 
     provider = FakeProvider([text_reply("ok")])
     events = [
