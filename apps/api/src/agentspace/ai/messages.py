@@ -21,6 +21,9 @@ type StopReason = Literal["stop", "length", "tool_use", "error", "aborted"]
 - `aborted`: the run was cancelled mid-stream.
 """
 
+# How hard a reasoning model thinks before it answers (ADR-012); "off" asks for nothing, so the model's default applies.
+type ThinkingLevel = Literal["off", "minimal", "low", "medium", "high"]
+
 
 def now_ms() -> int:
     """Current time as Unix milliseconds, the timestamp unit every message uses."""
@@ -33,6 +36,16 @@ class TextContent(BaseModel):
 
     type: Literal["text"] = "text"  # TS: type: "text" — a fixed tag that is also the default
     text: str
+
+
+class ThinkingContent(BaseModel):
+    """The model's reasoning before its answer; shown in the UI and sent back to the same model (ADR-012)."""
+
+    type: Literal["thinking"] = "thinking"
+    thinking: str
+    """The reasoning text; empty when the provider sent only encrypted reasoning."""
+    signature: str | None = None
+    """What sending it back needs: the wire field the text came in, or the provider's reasoning details as JSON."""
 
 
 class ToolCall(BaseModel):
@@ -52,6 +65,8 @@ class Usage(BaseModel):
     input: int = 0
     output: int = 0
     total: int = 0
+    reasoning: int = 0
+    """Thinking tokens; already counted in `output`, not on top of it."""
 
 
 class UserMessage(BaseModel):
@@ -63,11 +78,11 @@ class UserMessage(BaseModel):
 
 
 class AssistantMessage(BaseModel):
-    """One model reply: text and tool calls, plus how and why it ended."""
+    """One model reply: thinking, text and tool calls, plus how and why it ended."""
 
     role: Literal["assistant"] = "assistant"
-    # TS: (TextContent | ToolCall)[], a discriminated union narrowed by `type`.
-    content: list[Annotated[TextContent | ToolCall, Field(discriminator="type")]] = []
+    # TS: (ThinkingContent | TextContent | ToolCall)[], a discriminated union narrowed by `type`.
+    content: list[Annotated[ThinkingContent | TextContent | ToolCall, Field(discriminator="type")]] = []
     provider: str
     model: str
     usage: Usage = Usage()
@@ -77,9 +92,13 @@ class AssistantMessage(BaseModel):
 
     # TS: `self` is `this`, written out as the first parameter of every method.
     def text(self) -> str:
-        """All text blocks joined, without the tool calls."""
+        """All text blocks joined, without thinking or tool calls."""
         # TS: this.content.filter((b) => b instanceof TextContent).map((b) => b.text).join("")
         return "".join(block.text for block in self.content if isinstance(block, TextContent))
+
+    def thinking(self) -> str:
+        """All thinking blocks joined; kept out of `text()` so summaries and titles see only the answer."""
+        return "".join(block.thinking for block in self.content if isinstance(block, ThinkingContent))
 
     def tool_calls(self) -> list[ToolCall]:
         """The tool calls in this reply, in the order the model made them."""

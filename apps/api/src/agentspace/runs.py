@@ -32,8 +32,8 @@ from agentspace.agent.events import (
 )
 from agentspace.agent.loop import Emit
 from agentspace.agent.messages import AgentMessage
-from agentspace.ai.messages import AssistantMessage, TextContent, UserMessage
-from agentspace.ai.provider import TextDeltaEvent, ToolCallEndEvent
+from agentspace.ai.messages import AssistantMessage, TextContent, ThinkingContent, UserMessage
+from agentspace.ai.provider import TextDeltaEvent, ThinkingDeltaEvent, ToolCallEndEvent
 from agentspace.session.store import SessionStore
 
 log = logging.getLogger(__name__)
@@ -156,6 +156,13 @@ class ActiveRun:
                     content[-1].text += delta
                 else:
                     content.append(TextContent(text=delta))
+            case MessageUpdateEvent(event=ThinkingDeltaEvent(delta=delta)) if self.streaming:
+                content = self.streaming.content
+                # Thinking comes before the answer, so its block is the first one or not there yet.
+                if content and isinstance(content[0], ThinkingContent):
+                    content[0].thinking += delta
+                else:
+                    content.insert(0, ThinkingContent(thinking=delta))
             case MessageUpdateEvent(event=ToolCallEndEvent(tool_call=call)) if self.streaming:
                 self.streaming.content.append(call)
             case MessageEndEvent(message=message):

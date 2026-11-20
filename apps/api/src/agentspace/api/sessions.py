@@ -1,4 +1,4 @@
-"""HTTP routes for sessions: create, list, read, switch model, prompt, continue, compact, watch, steer or stop."""
+"""HTTP routes for sessions: create, list, read, change settings, prompt, continue, compact, watch, steer or stop."""
 
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from datetime import datetime
@@ -16,7 +16,7 @@ from agentspace.agent.messages import AgentMessage, NoticeMessage
 from agentspace.agent.prompt import build_system_prompt
 from agentspace.agent.tool import ToolContext
 from agentspace.ai.catalog import CatalogError, OpenRouterCatalog
-from agentspace.ai.messages import AssistantMessage, UserMessage
+from agentspace.ai.messages import AssistantMessage, ThinkingLevel, UserMessage
 from agentspace.ai.overflow import is_context_overflow
 from agentspace.ai.providers import PROVIDERS
 from agentspace.api.deps import CatalogDep, Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
@@ -37,6 +37,8 @@ class SessionCreate(BaseModel):
     """The prompt's preamble; the tool list, rules and workspace sections are added on every run."""
     tool_set: ToolSetName | None = None
     """Which preset of tools the session gets; stored as the list of tool names."""
+    thinking_level: ThinkingLevel | None = None
+    """How hard the model thinks; "off" (the model's own default) when left out."""
     title: str | None = None
 
 
@@ -49,6 +51,7 @@ class SessionPublic(BaseModel):
     model: str
     system_prompt: str
     tools: list[str]
+    thinking_level: ThinkingLevel
     created_at: datetime
     updated_at: datetime
     running: bool = False
@@ -65,9 +68,10 @@ class SessionDetail(SessionPublic):
 
 
 class SessionUpdate(BaseModel):
-    """Fields to change on a session; only `model` for now (ADR-005)."""
+    """Fields to change on a session: the model (ADR-005) and how hard it thinks (ADR-012); unset ones stay."""
 
-    model: str = Field(min_length=1)
+    model: str | None = Field(default=None, min_length=1)
+    thinking_level: ThinkingLevel | None = None
 
 
 def public(session: SessionRow, runs: RunManager) -> SessionPublic:
@@ -99,6 +103,7 @@ async def create_session(body: SessionCreate, store: StoreDep, settings: Setting
         model=body.model or settings.default_model,
         system_prompt=body.system_prompt or settings.default_system_prompt,
         tools=list(TOOL_SETS[body.tool_set or settings.default_tool_set]),
+        thinking_level=body.thinking_level or "off",
         title=body.title,
     )
     return public(session, runs)
@@ -123,18 +128,20 @@ async def get_session(session: SessionRowDep, store: StoreDep, runs: RunsDep) ->
 
 @router.patch("/{session_id}")
 async def update_session(body: SessionUpdate, session: SessionRowDep, store: StoreDep, runs: RunsDep) -> SessionPublic:
-    """Switch the session's model; the next run uses it. 409 while a run is in progress.
+    """Switch the session's model or thinking level; the next run uses them. 409 while a run is in progress.
 
     A real switch also leaves a notice in the transcript for the reader; the model never sees it (ADR-008).
     """
-    # A run reads the model once when it starts, so a switch mid-run would look applied but wasn't.
+    # A run reads these once when it starts, so a switch mid-run would look applied but wasn't.
     # It also keeps the notice from landing between a tool call and its result.
     if runs.is_running(session.id):
-        raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the current run to finish before switching models.")
-    previous = session.model
-    if body.model != previous:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the current run to finish before switching.")
+    if body.model is not None and body.model != (previous := session.model):
         await store.set_model(session, body.model)
         await store.append(session, NoticeMessage(text=f"Switched model from {previous} to {body.model}"))
+    if body.thinking_level is not None and body.thinking_level != (previous := session.thinking_level):
+        await store.set_thinking_level(session, body.thinking_level)
+        await store.append(session, NoticeMessage(text=f"Switched thinking from {previous} to {body.thinking_level}"))
     return public(session, runs)
 
 
@@ -217,6 +224,7 @@ async def compact_session(
             max_tokens=settings.max_output_tokens,
             reason="manual",
             emit=emit,
+            thinking_level=run.session.thinking_level,
         )
         new = run.active.messages[-1:] if saved else []
         await emit(AgentEndEvent(reason="done" if saved else "error", new_messages=new))
@@ -270,6 +278,7 @@ async def stream_run(
             ctx=ToolContext(workspace=run.workspace),
             max_turns=settings.max_turns,
             max_tokens=settings.max_output_tokens,
+            thinking_level=session.thinking_level,
             # Messages the user queues during the run (`POST .../steer`, `.../follow-up`).
             config=LoopConfig(
                 get_steering_messages=run.active.take_steering,
@@ -288,6 +297,7 @@ async def stream_run(
             max_tokens=settings.max_output_tokens,
             reason=reason,
             emit=emit,
+            thinking_level=session.thinking_level,
         )
 
     async def over_threshold() -> bool:

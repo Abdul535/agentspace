@@ -21,6 +21,8 @@ class ModelInfo(BaseModel):
     """US dollars per million input tokens; None when the price varies, as for routers like `openrouter/auto`."""
     output_price: float | None
     """US dollars per million output tokens; None when the price varies."""
+    reasoning: bool = False
+    """Whether the model takes a thinking level (OpenRouter's `reasoning` parameter, ADR-012)."""
 
 
 class CatalogError(Exception):
@@ -72,6 +74,7 @@ def to_model_info(raw: dict) -> ModelInfo:
         context_length=raw.get("context_length"),
         input_price=per_million(pricing.get("prompt")),
         output_price=per_million(pricing.get("completion")),
+        reasoning="reasoning" in (raw.get("supported_parameters") or []),
     )
 
 

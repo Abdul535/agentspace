@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, errorMessage, type SessionDetail } from "./client";
+import { api, errorMessage, type SessionDetail, type ThinkingLevel } from "./client";
 
 export const queryKeys = {
   sessions: ["sessions"] as const,
@@ -59,14 +59,17 @@ export function useModels() {
   });
 }
 
-// Switches a session's model; the cached session keeps its transcript and takes the new model.
-export function useSetSessionModel(id: string) {
+/** Session settings a PATCH can change; fields left out stay as they are. */
+export type SessionChange = { model?: string; thinking_level?: ThinkingLevel };
+
+// Switches a session's model or thinking level; the cached session keeps its transcript and takes the change.
+export function useUpdateSession(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (model: string) => {
+    mutationFn: async (change: SessionChange) => {
       const { data, error } = await api.PATCH("/sessions/{session_id}", {
         params: { path: { session_id: id } },
-        body: { model },
+        body: change,
       });
       if (error) throw new Error(errorMessage(error));
       return data;

@@ -12,7 +12,14 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel
 
-from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage
+from agentspace.ai.messages import (
+    AssistantMessage,
+    Message,
+    TextContent,
+    ThinkingLevel,
+    ToolCall,
+    ToolResultMessage,
+)
 
 
 class ToolSpec(BaseModel):
@@ -32,6 +39,8 @@ class Context(BaseModel):
     tools: list[ToolSpec] = []
     max_tokens: int | None = None
     """Cap on output tokens. Without one, some APIs reserve the model's maximum and refuse low-credit keys."""
+    thinking_level: ThinkingLevel = "off"
+    """How hard a reasoning model should think; "off" sends nothing, so the model's default applies."""
 
 
 class StartEvent(BaseModel):
@@ -44,6 +53,13 @@ class TextDeltaEvent(BaseModel):
     """A new piece of reply text."""
 
     type: Literal["text_delta"] = "text_delta"
+    delta: str
+
+
+class ThinkingDeltaEvent(BaseModel):
+    """A new piece of the model's reasoning, streamed before its answer."""
+
+    type: Literal["thinking_delta"] = "thinking_delta"
     delta: str
 
 
@@ -69,7 +85,7 @@ class ErrorEvent(BaseModel):
 
 
 # What a provider stream yields; the last item is always a DoneEvent or an ErrorEvent.
-type AssistantEvent = StartEvent | TextDeltaEvent | ToolCallEndEvent | DoneEvent | ErrorEvent
+type AssistantEvent = StartEvent | ThinkingDeltaEvent | TextDeltaEvent | ToolCallEndEvent | DoneEvent | ErrorEvent
 
 
 class Provider(Protocol):

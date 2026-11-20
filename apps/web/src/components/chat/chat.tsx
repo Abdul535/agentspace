@@ -7,6 +7,7 @@ import { ActivityPanel } from "@/components/chat/activity-panel";
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
 import { ModelPicker } from "@/components/chat/model-picker";
+import { ThinkingPicker } from "@/components/chat/thinking-picker";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -27,7 +28,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
   // Keep the newest output in view while it streams, unless the reader scrolled up.
   const scroller = useRef<HTMLDivElement>(null);
   const liveOutputSize = [...run.toolOutput.values()].reduce((total, text) => total + text.length, 0);
-  const contentSize = messages.length + (run.draft?.length ?? 0) + run.pendingTools.size + liveOutputSize;
+  const contentSize =
+    messages.length + (run.draft?.length ?? 0) + (run.draftThinking?.length ?? 0) + run.pendingTools.size + liveOutputSize;
   useEffect(() => {
     const el = scroller.current;
     if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 160) el.scrollTop = el.scrollHeight;
@@ -53,6 +55,12 @@ export function Chat({ sessionId }: { sessionId: string }) {
             <>
               <h1 className="truncate text-sm font-medium">{session.data.title ?? "Untitled session"}</h1>
               <ModelPicker sessionId={sessionId} model={session.data.model} running={run.running} />
+              <ThinkingPicker
+                sessionId={sessionId}
+                model={session.data.model}
+                level={session.data.thinking_level}
+                running={run.running}
+              />
             </>
           ) : (
             <Skeleton className="mr-auto h-4 w-48" />
@@ -98,6 +106,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
               <MessageList
                 messages={messages}
                 draft={run.draft}
+                draftThinking={run.draftThinking}
                 pendingTools={run.pendingTools}
                 toolOutput={run.toolOutput}
               />

@@ -17,7 +17,7 @@ from agentspace.agent.events import (
 )
 from agentspace.agent.loop import Emit
 from agentspace.agent.messages import AgentMessage, CompactionSummaryMessage, NoticeMessage, convert_to_llm
-from agentspace.ai.messages import AssistantMessage, Message, ToolResultMessage, UserMessage
+from agentspace.ai.messages import AssistantMessage, Message, ThinkingLevel, ToolResultMessage, UserMessage
 from agentspace.ai.provider import Context, DoneEvent, ErrorEvent, Provider
 
 # The model is asked for these sections, so a summary always says what was done and what comes next.
@@ -99,7 +99,12 @@ def estimate_tokens(message: AgentMessage) -> int:
         case UserMessage():
             chars = len(message.content)
         case AssistantMessage():
-            chars = len(message.text()) + sum(len(c.name) + len(json.dumps(c.arguments)) for c in message.tool_calls())
+            # Thinking counts: it is sent back and fills the window like any text.
+            chars = (
+                len(message.thinking())
+                + len(message.text())
+                + sum(len(c.name) + len(json.dumps(c.arguments)) for c in message.tool_calls())
+            )
         case ToolResultMessage():
             chars = sum(len(block.text) for block in message.content)
         case CompactionSummaryMessage():
@@ -167,15 +172,27 @@ def serialize(messages: Sequence[Message]) -> str:
 
 
 async def summarize(
-    provider: Provider, model: str, messages: Sequence[AgentMessage], previous: str | None, max_tokens: int | None
+    provider: Provider,
+    model: str,
+    messages: Sequence[AgentMessage],
+    previous: str | None,
+    max_tokens: int | None,
+    thinking_level: ThinkingLevel = "off",
 ) -> str:
-    """Ask the model for a summary of `messages`, folding in the `previous` summary if there is one."""
+    """Ask the model for a summary of `messages`, folding in the `previous` summary if there is one.
+
+    Thinking is left out of what it reads (`serialize` uses `text()`), as in pi: it is the
+    model's scratch work, and the answers and tool calls already hold what came of it.
+    """
     text = f"<conversation>\n{serialize(convert_to_llm(list(messages)))}\n</conversation>\n\n"
     if previous:
         text += f"<previous-summary>\n{previous}\n</previous-summary>\n\n"
     text += UPDATE_PROMPT if previous else SUMMARIZE_PROMPT
     context = Context(
-        system_prompt=SUMMARIZER_SYSTEM_PROMPT, messages=[UserMessage(content=text)], max_tokens=max_tokens
+        system_prompt=SUMMARIZER_SYSTEM_PROMPT,
+        messages=[UserMessage(content=text)],
+        max_tokens=max_tokens,
+        thinking_level=thinking_level,
     )
 
     reply: AssistantMessage | None = None
@@ -208,6 +225,7 @@ async def compact(
     max_tokens: int | None,
     reason: CompactionReason,
     emit: Emit,
+    thinking_level: ThinkingLevel = "off",
 ) -> bool:
     """Summarize the transcript's older part and emit the summary as a message; False (and nothing saved) on failure.
 
@@ -225,7 +243,9 @@ async def compact(
     previous = context[0] if isinstance(context[0], CompactionSummaryMessage) else None
     older = context[1 if previous else 0 : cut]
     try:
-        text = await summarize(provider, model, older, previous.summary if previous else None, max_tokens)
+        text = await summarize(
+            provider, model, older, previous.summary if previous else None, max_tokens, thinking_level
+        )
     except CompactionError as exc:
         await emit(CompactionEndEvent(reason=reason, error=f"Compaction failed: {exc}"))
         return False

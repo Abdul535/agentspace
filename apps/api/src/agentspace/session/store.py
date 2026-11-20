@@ -5,6 +5,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from agentspace.agent.messages import AgentMessage
+from agentspace.ai.messages import ThinkingLevel
 from agentspace.session.models import MessageRow, SessionRow, utcnow
 
 # Turns a stored JSON message back into the right message class by its `role` (app messages included, ADR-008).
@@ -19,10 +20,24 @@ class SessionStore:
         self.db = db
 
     async def create(
-        self, *, provider: str, model: str, system_prompt: str, tools: list[str], title: str | None = None
+        self,
+        *,
+        provider: str,
+        model: str,
+        system_prompt: str,
+        tools: list[str],
+        thinking_level: ThinkingLevel = "off",
+        title: str | None = None,
     ) -> SessionRow:
         """Create and save a new, empty session."""
-        row = SessionRow(provider=provider, model=model, system_prompt=system_prompt, tools=tools, title=title)
+        row = SessionRow(
+            provider=provider,
+            model=model,
+            system_prompt=system_prompt,
+            tools=tools,
+            thinking_level=thinking_level,
+            title=title,
+        )
         self.db.add(row)
         await self.db.commit()  # TS: commits the transaction; nothing is written until then
         return row
@@ -40,6 +55,13 @@ class SessionStore:
     async def set_model(self, session: SessionRow, model: str) -> SessionRow:
         """Switch the model the session's next runs use."""
         session.model = model
+        self.db.add(session)
+        await self.db.commit()
+        return session
+
+    async def set_thinking_level(self, session: SessionRow, level: ThinkingLevel) -> SessionRow:
+        """Change how hard the model thinks on the session's next runs."""
+        session.thinking_level = level
         self.db.add(session)
         await self.db.commit()
         return session

@@ -21,6 +21,8 @@ type RunState = {
   messages: Message[];
   /** Text of the assistant message being streamed; null when none is streaming. */
   draft: string | null;
+  /** Reasoning of the assistant message being streamed, which arrives before its text (ADR-012); null when none. */
+  draftThinking: string | null;
   /** Tool calls currently executing, by call id. */
   pendingTools: Set<string>;
   /** Latest live output of running tool calls (e.g. bash so far), by call id. Each update replaces the last. */
@@ -35,6 +37,7 @@ const idle: RunState = {
   base: null,
   messages: [],
   draft: null,
+  draftThinking: null,
   pendingTools: new Set(),
   toolOutput: new Map(),
   compacting: false,
@@ -45,17 +48,30 @@ const idle: RunState = {
 function reduce(s: RunState, event: RunStreamEvent): RunState {
   switch (event.type) {
     case "run_snapshot": {
+      const content = event.streaming?.content ?? [];
       const draft = event.streaming
-        ? event.streaming.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("")
+        ? content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("")
         : null;
-      return { ...s, base: event.messages, messages: [], draft, pendingTools: new Set(event.pending_tools) };
+      const thinking = content.flatMap((block) => (block.type === "thinking" ? [block.thinking] : [])).join("");
+      return {
+        ...s,
+        base: event.messages,
+        messages: [],
+        draft,
+        draftThinking: thinking || null,
+        pendingTools: new Set(event.pending_tools),
+      };
     }
     case "message_start":
-      return event.message.role === "assistant" ? { ...s, draft: "" } : s;
+      return event.message.role === "assistant" ? { ...s, draft: "", draftThinking: null } : s;
     case "message_update":
-      return event.event.type === "text_delta" ? { ...s, draft: (s.draft ?? "") + event.event.delta } : s;
+      if (event.event.type === "text_delta") return { ...s, draft: (s.draft ?? "") + event.event.delta };
+      if (event.event.type === "thinking_delta") {
+        return { ...s, draftThinking: (s.draftThinking ?? "") + event.event.delta };
+      }
+      return s;
     case "message_end":
-      return { ...s, messages: [...s.messages, event.message], draft: null };
+      return { ...s, messages: [...s.messages, event.message], draft: null, draftThinking: null };
     case "tool_execution_start":
       return { ...s, pendingTools: new Set(s.pendingTools).add(event.tool_call_id) };
     case "tool_execution_update": {

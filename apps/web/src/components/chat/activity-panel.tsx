@@ -134,6 +134,8 @@ function buildEntries(messages: Message[], draft: string | null, pendingTools: S
         continue;
       }
       for (const block of message.content) {
+        // The panel tracks what the agent did; its reasoning stays in the chat.
+        if (block.type === "thinking") continue;
         if (block.type === "text") {
           if (block.text.trim()) entries.push({ kind: "assistant", text: block.text });
           continue;

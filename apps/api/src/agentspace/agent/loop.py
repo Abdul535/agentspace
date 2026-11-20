@@ -52,13 +52,21 @@ from agentspace.agent.hooks import (
 )
 from agentspace.agent.messages import AgentMessage, convert_to_llm
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
-from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage
+from agentspace.ai.messages import (
+    AssistantMessage,
+    TextContent,
+    ThinkingLevel,
+    ToolCall,
+    ToolResultMessage,
+    UserMessage,
+)
 from agentspace.ai.provider import (
     Context,
     DoneEvent,
     ErrorEvent,
     Provider,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolCallEndEvent,
     prepare_transcript,
 )
@@ -100,6 +108,7 @@ async def run_agent(
     ctx: ToolContext,
     max_turns: int,
     max_tokens: int | None = None,
+    thinking_level: ThinkingLevel = "off",
     config: LoopConfig | None = None,
 ) -> AsyncGenerator[AgentEvent]:  # TS: AsyncGenerator<AgentEvent>; it has aclose(), a bare AsyncIterator doesn't
     """Run the agent on one prompt (or continue, with None) and yield its events: `run_loop` in a task."""
@@ -116,6 +125,7 @@ async def run_agent(
             ctx=ctx,
             max_turns=max_turns,
             max_tokens=max_tokens,
+            thinking_level=thinking_level,
             config=config,
             emit=queue.put,
         )
@@ -147,6 +157,7 @@ async def run_loop(
     ctx: ToolContext,
     max_turns: int,
     max_tokens: int | None = None,
+    thinking_level: ThinkingLevel = "off",
     config: LoopConfig | None = None,
     emit: Emit,
 ) -> None:
@@ -201,16 +212,22 @@ async def run_loop(
             await emit(MessageEndEvent(message=message))
         pending = []
 
-        # Stream the model's reply, forwarding text and tool-call pieces as they arrive.
+        # Stream the model's reply, forwarding thinking, text and tool-call pieces as they arrive.
         assistant: AssistantMessage | None = None
         await emit(MessageStartEvent(message=AssistantMessage(provider=provider.name, model=model)))
         # The model gets the transcript converted: the app's own messages are dropped or rewritten here.
         llm_messages = config.convert_to_llm(list(messages))
-        context = Context(system_prompt=system_prompt, messages=llm_messages, tools=tool_specs, max_tokens=max_tokens)
+        context = Context(
+            system_prompt=system_prompt,
+            messages=llm_messages,
+            tools=tool_specs,
+            max_tokens=max_tokens,
+            thinking_level=thinking_level,
+        )
         # TS: for await (const event of provider.stream(...)), then a switch on the event's class.
         async for event in provider.stream(model, context):
             match event:
-                case TextDeltaEvent() | ToolCallEndEvent():
+                case ThinkingDeltaEvent() | TextDeltaEvent() | ToolCallEndEvent():
                     await emit(MessageUpdateEvent(event=event))
                 case DoneEvent() | ErrorEvent():
                     assistant = event.message

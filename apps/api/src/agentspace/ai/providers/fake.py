@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncIterator, Callable
 
-from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall
+from agentspace.ai.messages import AssistantMessage, TextContent, ThinkingContent, ToolCall
 from agentspace.ai.provider import (
     AssistantEvent,
     Context,
@@ -10,6 +10,7 @@ from agentspace.ai.provider import (
     ErrorEvent,
     StartEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolCallEndEvent,
 )
 
@@ -43,7 +44,9 @@ class FakeProvider:
         message.provider, message.model = self.name, model  # TS: [a, b] = [x, y]
         yield StartEvent()
         for block in message.content:
-            if isinstance(block, TextContent):
+            if isinstance(block, ThinkingContent):
+                yield ThinkingDeltaEvent(delta=block.thinking)
+            elif isinstance(block, TextContent):
                 yield TextDeltaEvent(delta=block.text)
             else:
                 yield ToolCallEndEvent(tool_call=block)

@@ -1,7 +1,7 @@
 "use client";
 
 import { code } from "@streamdown/code";
-import { AlertCircle, ChevronRight } from "lucide-react";
+import { AlertCircle, Brain, ChevronRight } from "lucide-react";
 import { Streamdown } from "streamdown";
 
 import { ToolCallView } from "@/components/chat/tool-call";
@@ -12,15 +12,17 @@ import type { AssistantMessage, CompactionSummaryMessage, Message, ToolResultMes
 // Shiki highlighting for fenced code; defined once so Streamdown's memo isn't broken by a new object each render.
 const plugins = { code };
 
-/** The transcript: user prompts, assistant replies with their tool calls inline, and notices as dividers. Tool results render inside their call. */
+/** The transcript: user prompts, assistant replies with their thinking and tool calls inline, and notices as dividers. Tool results render inside their call. */
 export function MessageList({
   messages,
   draft,
+  draftThinking,
   pendingTools,
   toolOutput,
 }: {
   messages: Message[];
   draft: string | null;
+  draftThinking: string | null;
   pendingTools: Set<string>;
   toolOutput: Map<string, string>;
 }) {
@@ -61,6 +63,7 @@ export function MessageList({
         }
         return null;
       })}
+      {draftThinking && <Thinking text={draftThinking} streaming={!draft} />}
       {draft !== null && (
         <Streamdown plugins={plugins} caret="block" isAnimating>
           {draft}
@@ -101,6 +104,23 @@ function CompactionDivider({ message }: { message: CompactionSummaryMessage }) {
   );
 }
 
+// The model's reasoning before its answer (ADR-012): open while it streams, folded away once the reply is saved.
+function Thinking({ text, streaming = false }: { text: string; streaming?: boolean }) {
+  return (
+    // The streamed and saved replies are different elements, so the saved one starts closed on its own.
+    <Collapsible defaultOpen={streaming} className="flex flex-col gap-2">
+      <CollapsibleTrigger className="group flex items-center gap-1.5 self-start text-sm text-muted-foreground hover:text-foreground">
+        <Brain className="size-4" />
+        <span className={streaming ? "animate-pulse" : undefined}>{streaming ? "Thinking…" : "Thought"}</span>
+        <ChevronRight className="size-3.5 transition-transform group-data-[state=open]:rotate-90" />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-l-2 pl-3 text-sm text-pretty whitespace-pre-wrap text-muted-foreground">
+        {text}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 function AssistantReply({
   message,
   results,
@@ -124,12 +144,17 @@ function AssistantReply({
 
   return (
     <div className="flex flex-col gap-2">
-      {message.content.map((block, index) =>
-        block.type === "text" ? (
-          <Streamdown key={index} plugins={plugins} mode="static">
-            {block.text}
-          </Streamdown>
-        ) : (
+      {message.content.map((block, index) => {
+        // Encrypted-only reasoning has no text to show; it is kept only to send back to the model.
+        if (block.type === "thinking") return block.thinking.trim() ? <Thinking key={index} text={block.thinking} /> : null;
+        if (block.type === "text") {
+          return (
+            <Streamdown key={index} plugins={plugins} mode="static">
+              {block.text}
+            </Streamdown>
+          );
+        }
+        return (
           <ToolCallView
             key={block.id}
             call={block}
@@ -137,8 +162,8 @@ function AssistantReply({
             pending={pendingTools.has(block.id)}
             liveOutput={toolOutput.get(block.id)}
           />
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }
