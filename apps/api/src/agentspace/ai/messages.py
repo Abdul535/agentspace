@@ -38,6 +38,39 @@ class TextContent(BaseModel):
     text: str
 
 
+class ImageContent(BaseModel):
+    """An image in a user message or tool result, inline as base64 (ADR-015)."""
+
+    type: Literal["image"] = "image"
+    data: str
+    """Base64 of the image bytes, without a `data:` prefix."""
+    mime_type: str
+    """One of `image/png`, `image/jpeg`, `image/gif`, `image/webp`."""
+
+
+# What a user message or a tool result can hold; `type` tells the blocks apart when parsing JSON.
+# TS: (TextContent | ImageContent), narrowed by `type`.
+type UserContent = Annotated[TextContent | ImageContent, Field(discriminator="type")]
+
+
+# Stands in for each image when the model can't see images (ADR-015), after pi's `blockImages`.
+IMAGE_NOT_SHOWN = "[Image not shown: this model can't see images.]"
+
+
+def joined_text(content: str | list[UserContent]) -> str:
+    """The text blocks of `content` joined, leaving images out; a plain string is returned as is."""
+    if isinstance(content, str):
+        return content
+    return "".join(block.text for block in content if isinstance(block, TextContent))
+
+
+def images_of(content: str | list[UserContent]) -> list[ImageContent]:
+    """The image blocks of `content`, in order; none for a plain string."""
+    if isinstance(content, str):
+        return []
+    return [block for block in content if isinstance(block, ImageContent)]
+
+
 class ThinkingContent(BaseModel):
     """The model's reasoning before its answer; shown in the UI and sent back to the same model (ADR-012)."""
 
@@ -73,8 +106,13 @@ class UserMessage(BaseModel):
     """A prompt from the person using the session."""
 
     role: Literal["user"] = "user"
-    content: str
+    content: str | list[UserContent]
+    """Plain text, or text and image blocks (ADR-015); old rows and text-only prompts stay a string."""
     timestamp: int = Field(default_factory=now_ms)  # TS: computed per instance, like `timestamp = Date.now()`
+
+    def text(self) -> str:
+        """The prompt's text without its images, for titles and summaries."""
+        return joined_text(self.content)
 
 
 class AssistantMessage(BaseModel):
@@ -112,7 +150,7 @@ class ToolResultMessage(BaseModel):
     role: Literal["tool_result"] = "tool_result"
     tool_call_id: str
     tool_name: str
-    content: list[TextContent]
+    content: list[UserContent]
     details: dict[str, Any] | None = None
     """The tool's structured facts for the UI; providers never send this to the model."""
     is_error: bool = False
@@ -122,3 +160,21 @@ class ToolResultMessage(BaseModel):
 # Any message in a transcript; `role` tells them apart when parsing JSON.
 # TS: type Message = UserMessage | AssistantMessage | ToolResultMessage, narrowed by `role`.
 type Message = Annotated[UserMessage | AssistantMessage | ToolResultMessage, Field(discriminator="role")]
+
+
+def strip_images(messages: list[Message]) -> list[Message]:
+    """The messages with every image swapped for a short note; the stored transcript keeps the images (ADR-015)."""
+    out: list[Message] = []
+    for m in messages:
+        if isinstance(m, UserMessage | ToolResultMessage) and images_of(m.content):
+            # TS: like `{ ...m, content: ... }`: a copy with one field changed; the stored message is untouched.
+            out.append(m.model_copy(update={"content": swap_images(m.content)}))
+        else:
+            out.append(m)
+    return out
+
+
+def swap_images(content: str | list[UserContent]) -> list[UserContent]:
+    """`content` as blocks, each image replaced by `IMAGE_NOT_SHOWN`."""
+    blocks: list[UserContent] = [TextContent(text=content)] if isinstance(content, str) else content
+    return [TextContent(text=IMAGE_NOT_SHOWN) if isinstance(b, ImageContent) else b for b in blocks]

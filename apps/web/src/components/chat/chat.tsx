@@ -11,7 +11,7 @@ import { ThinkingPicker } from "@/components/chat/thinking-picker";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useSession } from "@/lib/api/queries";
+import { useModels, useSession } from "@/lib/api/queries";
 import { useAgentRun } from "@/lib/api/use-agent-run";
 
 export function Chat({ sessionId }: { sessionId: string }) {
@@ -24,6 +24,9 @@ export function Chat({ sessionId }: { sessionId: string }) {
   // While attached to a run, its snapshot is the transcript; the fetched one may be missing what it saved since.
   const messages = [...(run.base ?? session.data?.messages ?? []), ...run.messages];
   const [activityOpen, setActivityOpen] = useState(true);
+  const catalog = useModels();
+  // A model the catalog doesn't know (or a catalog that's down) may attach; the provider then decides.
+  const canAttach = catalog.data?.models.find((m) => m.id === session.data?.model)?.image_input ?? true;
 
   // Keep the newest output in view while it streams, unless the reader scrolled up.
   const scroller = useRef<HTMLDivElement>(null);
@@ -143,6 +146,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
             value={input}
             onChange={setInput}
             running={run.running}
+            canAttach={canAttach}
             queued={run.queued}
             onSend={run.send}
             onQueue={run.queue}

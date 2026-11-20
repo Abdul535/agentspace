@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from agentspace.agent.messages import AgentMessage, convert_to_llm
 from agentspace.agent.tool import ExecutionMode
-from agentspace.ai.messages import AssistantMessage, Message, TextContent, ToolCall, ToolResultMessage
+from agentspace.ai.messages import AssistantMessage, Message, ToolCall, ToolResultMessage, UserContent
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class AfterToolCallContext:
     assistant_message: AssistantMessage
     tool_call: ToolCall
     args: BaseModel
-    content: list[TextContent]
+    content: list[UserContent]
     details: dict[str, Any] | None
     is_error: bool
 
@@ -57,7 +57,7 @@ class AfterToolCallContext:
 class AfterToolCallResult:
     """Fields to replace on the result. None keeps the tool's own value; anything else, even `[]`, replaces it."""
 
-    content: list[TextContent] | None = None
+    content: list[UserContent] | None = None
     details: dict[str, Any] | None = None
     is_error: bool | None = None
     terminate: bool | None = None

@@ -5,6 +5,7 @@ import { AlertCircle, Bot, Check, ChevronRight, LoaderCircle, User, X } from "lu
 import { ToolIcon } from "@/components/chat/tool-call";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { Message, ToolCall, ToolResultMessage } from "@/lib/api/client";
+import { imagesOf, textOf } from "@/lib/api/content";
 import { cn } from "@/lib/utils";
 
 // null: no result and not running, e.g. the run was stopped before the tool ran.
@@ -124,7 +125,10 @@ function buildEntries(messages: Message[], draft: string | null, pendingTools: S
   const entries: Entry[] = [];
   for (const message of messages) {
     if (message.role === "user") {
-      entries.push({ kind: "user", text: message.content });
+      const images = imagesOf(message.content).length;
+      // An image-only prompt still gets a line, so the panel shows that the user said something.
+      const text = textOf(message.content) || (images === 1 ? "An image" : images ? `${images} images` : "");
+      entries.push({ kind: "user", text });
     } else if (message.role === "assistant") {
       if (message.stop_reason === "error" || message.stop_reason === "aborted") {
         entries.push({

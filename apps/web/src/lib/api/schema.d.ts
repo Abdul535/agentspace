@@ -346,6 +346,45 @@ export interface components {
             detail?: components["schemas"]["ValidationError"][];
         };
         /**
+         * ImageContent
+         * @description An image in a user message or tool result, inline as base64 (ADR-015).
+         */
+        ImageContent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "image";
+            /** Data */
+            data: string;
+            /** Mime Type */
+            mime_type: string;
+        };
+        /**
+         * ImageInput
+         * @description An image attached to a prompt, as base64; its type is read from the bytes, not trusted from the client.
+         */
+        ImageInput: {
+            /** Data */
+            data: string;
+        };
+        /**
+         * MessageCreate
+         * @description A new user message to run the agent on: text, images (ADR-015), or both.
+         */
+        MessageCreate: {
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Images
+             * @default []
+             */
+            images: components["schemas"]["ImageInput"][];
+        };
+        /**
          * MessageEndEvent
          * @description A message is complete; this is the point where it gets saved.
          */
@@ -416,6 +455,11 @@ export interface components {
              * @default false
              */
             reasoning: boolean;
+            /**
+             * Image Input
+             * @default false
+             */
+            image_input: boolean;
         };
         /**
          * NoticeMessage
@@ -434,7 +478,7 @@ export interface components {
         };
         /**
          * PromptCreate
-         * @description A new user message to run the agent on.
+         * @description A text message for a run: steering or a follow-up.
          */
         PromptCreate: {
             /** Content */
@@ -706,7 +750,7 @@ export interface components {
          */
         ToolResult: {
             /** Content */
-            content: components["schemas"]["TextContent"][];
+            content: components["schemas"]["UserContent"][];
             /** Details */
             details?: {
                 [key: string]: unknown;
@@ -737,7 +781,7 @@ export interface components {
             /** Tool Name */
             tool_name: string;
             /** Content */
-            content: components["schemas"]["TextContent"][];
+            content: components["schemas"]["UserContent"][];
             /** Details */
             details?: {
                 [key: string]: unknown;
@@ -807,6 +851,7 @@ export interface components {
              */
             reasoning: number;
         };
+        UserContent: components["schemas"]["TextContent"] | components["schemas"]["ImageContent"];
         /**
          * UserMessage
          * @description A prompt from the person using the session.
@@ -818,7 +863,7 @@ export interface components {
              */
             role: "user";
             /** Content */
-            content: string;
+            content: string | components["schemas"]["UserContent"][];
             /** Timestamp */
             timestamp?: number;
         };
@@ -974,7 +1019,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["PromptCreate"];
+                "application/json": components["schemas"]["MessageCreate"];
             };
         };
         responses: {

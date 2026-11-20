@@ -4,10 +4,12 @@ import { code } from "@streamdown/code";
 import { AlertCircle, Brain, ChevronRight } from "lucide-react";
 import { type AnimateOptions, Streamdown } from "streamdown";
 
+import { ImageThumbnails } from "@/components/chat/image-thumbnails";
 import { ToolCallView } from "@/components/chat/tool-call";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { AssistantMessage, CompactionSummaryMessage, Message, ToolResultMessage } from "@/lib/api/client";
+import { imageSrc, imagesOf, textOf } from "@/lib/api/content";
 
 // Shiki highlighting for fenced code; defined once so Streamdown's memo isn't broken by a new object each render.
 const plugins = { code };
@@ -38,12 +40,15 @@ export function MessageList({
     <div className="flex flex-col gap-6">
       {messages.map((message, index) => {
         if (message.role === "user") {
+          const text = textOf(message.content);
           return (
-            <div
-              key={index}
-              className="max-w-[85%] self-end rounded-2xl bg-primary px-4 py-2.5 text-pretty whitespace-pre-wrap text-primary-foreground"
-            >
-              {message.content}
+            <div key={index} className="flex max-w-[85%] flex-col items-end gap-2 self-end">
+              <ImageThumbnails srcs={imagesOf(message.content).map(imageSrc)} className="justify-end" />
+              {text && (
+                <div className="rounded-2xl bg-primary px-4 py-2.5 text-pretty whitespace-pre-wrap text-primary-foreground">
+                  {text}
+                </div>
+              )}
             </div>
           );
         }

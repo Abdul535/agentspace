@@ -17,7 +17,16 @@ from agentspace.agent.events import (
 )
 from agentspace.agent.loop import Emit
 from agentspace.agent.messages import AgentMessage, CompactionSummaryMessage, NoticeMessage, convert_to_llm
-from agentspace.ai.messages import AssistantMessage, Message, ThinkingLevel, ToolResultMessage, UserMessage
+from agentspace.ai.messages import (
+    AssistantMessage,
+    Message,
+    ThinkingLevel,
+    ToolResultMessage,
+    UserContent,
+    UserMessage,
+    images_of,
+    joined_text,
+)
 from agentspace.ai.provider import Context, DoneEvent, ErrorEvent, Provider
 
 # The model is asked for these sections, so a summary always says what was done and what comes next.
@@ -66,6 +75,9 @@ SUMMARIZER_SYSTEM_PROMPT = "You summarize conversations between a user and a cod
 # A long tool result is cut to this many characters in the text sent for summarizing.
 TOOL_RESULT_MAX_CHARS = 2000
 
+# An image counts as this many characters (~1200 tokens) in the estimate, as in pi (`ESTIMATED_IMAGE_CHARS`).
+IMAGE_CHARS = 4800
+
 
 class CompactionError(Exception):
     """The summary couldn't be made; nothing was saved."""
@@ -97,7 +109,7 @@ def estimate_tokens(message: AgentMessage) -> int:
     """A rough token count, characters ÷ 4 (pi's estimate; it errs high)."""
     match message:
         case UserMessage():
-            chars = len(message.content)
+            chars = content_chars(message.content)
         case AssistantMessage():
             # Thinking counts: it is sent back and fills the window like any text.
             chars = (
@@ -106,12 +118,22 @@ def estimate_tokens(message: AgentMessage) -> int:
                 + sum(len(c.name) + len(json.dumps(c.arguments)) for c in message.tool_calls())
             )
         case ToolResultMessage():
-            chars = sum(len(block.text) for block in message.content)
+            chars = content_chars(message.content)
         case CompactionSummaryMessage():
             chars = len(message.summary)
         case NoticeMessage():
             chars = 0
     return chars // 4
+
+
+def content_chars(content: str | list[UserContent]) -> int:
+    """Characters of text, plus a fixed count per image (its base64 length says nothing about its tokens)."""
+    return len(joined_text(content)) + IMAGE_CHARS * len(images_of(content))
+
+
+def with_image_marks(content: str | list[UserContent]) -> str:
+    """The text, with `[image]` for each image, so the summarizer knows one was there without being sent it."""
+    return joined_text(content) + " [image]" * len(images_of(content))
 
 
 def context_tokens(context: Sequence[AgentMessage]) -> int:
@@ -155,7 +177,7 @@ def serialize(messages: Sequence[Message]) -> str:
     for m in messages:
         match m:
             case UserMessage():
-                parts.append(f"[User]: {m.content}")
+                parts.append(f"[User]: {with_image_marks(m.content)}")
             case AssistantMessage():
                 if text := m.text():
                     parts.append(f"[Assistant]: {text}")
@@ -164,9 +186,10 @@ def serialize(messages: Sequence[Message]) -> str:
                         "[Assistant tool calls]: " + "; ".join(f"{c.name}({json.dumps(c.arguments)})" for c in calls)
                     )
             case ToolResultMessage():
-                text = "".join(block.text for block in m.content)
+                text = joined_text(m.content)
                 if len(text) > TOOL_RESULT_MAX_CHARS:
                     text = text[:TOOL_RESULT_MAX_CHARS] + f"\n[… {len(text) - TOOL_RESULT_MAX_CHARS} more characters]"
+                text += " [image]" * len(images_of(m.content))
                 parts.append(f"[Tool result]: {text}")
     return "\n\n".join(parts)
 

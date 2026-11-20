@@ -1,9 +1,12 @@
 """HTTP routes for sessions: create, list, read, change settings, prompt, continue, compact, watch, steer or stop."""
 
+import base64
+import binascii
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from datetime import datetime
 from typing import Annotated, Literal
 
+from asyncer import asyncify
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.sse import EventSourceResponse
 from pydantic import BaseModel, Field
@@ -12,11 +15,20 @@ from agentspace.agent.compaction import build_context, can_compact, compact, con
 from agentspace.agent.events import AgentEndEvent, AgentEvent, AgentStartEvent
 from agentspace.agent.hooks import LoopConfig
 from agentspace.agent.loop import Emit, can_continue, run_loop
-from agentspace.agent.messages import AgentMessage, NoticeMessage
+from agentspace.agent.messages import AgentMessage, NoticeMessage, convert_to_llm
 from agentspace.agent.prompt import build_system_prompt
 from agentspace.agent.tool import ToolContext
-from agentspace.ai.catalog import CatalogError, OpenRouterCatalog
-from agentspace.ai.messages import AssistantMessage, ThinkingLevel, UserMessage
+from agentspace.ai.catalog import CatalogError, ModelInfo, OpenRouterCatalog
+from agentspace.ai.images import MAX_INPUT_BYTES, ImageError, base64_size, process_image
+from agentspace.ai.messages import (
+    AssistantMessage,
+    Message,
+    TextContent,
+    ThinkingLevel,
+    UserContent,
+    UserMessage,
+    strip_images,
+)
 from agentspace.ai.overflow import is_context_overflow
 from agentspace.ai.providers import PROVIDERS
 from agentspace.api.deps import CatalogDep, Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
@@ -82,9 +94,46 @@ def public(session: SessionRow, runs: RunManager) -> SessionPublic:
 
 
 class PromptCreate(BaseModel):
-    """A new user message to run the agent on."""
+    """A text message for a run: steering or a follow-up."""
 
     content: str = Field(min_length=1)  # TS: z.string().min(1)
+
+
+# Base64 of the largest image accepted, plus room for a `data:image/...;base64,` prefix.
+MAX_IMAGE_BASE64 = base64_size(MAX_INPUT_BYTES) + 64
+
+
+class ImageInput(BaseModel):
+    """An image attached to a prompt, as base64; its type is read from the bytes, not trusted from the client."""
+
+    data: str = Field(max_length=MAX_IMAGE_BASE64)
+    """Base64 of the image file, with or without a `data:<type>;base64,` prefix."""
+
+
+class MessageCreate(BaseModel):
+    """A new user message to run the agent on: text, images (ADR-015), or both."""
+
+    content: str = ""
+    images: list[ImageInput] = Field(default=[], max_length=5)
+
+
+async def prompt_message(body: MessageCreate) -> UserMessage:
+    """The body as the user message to save: text first, then each image shrunk to send. 422 if it is unusable."""
+    if not body.content.strip() and not body.images:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Send some text or an image.")
+    if not body.images:
+        return UserMessage(content=body.content)
+    blocks: list[UserContent] = [TextContent(text=body.content)] if body.content else []
+    for i, image in enumerate(body.images, start=1):
+        # TS: str.partition is like split(",", 2) that always returns three parts; it drops a data-URL prefix.
+        data = image.data.partition(",")[2] if image.data.startswith("data:") else image.data
+        try:
+            raw = base64.b64decode(data, validate=True)
+            # Decoding and resizing are CPU work, so they run on a worker thread, off the event loop.
+            blocks.append((await asyncify(process_image)(raw)).image)
+        except (binascii.Error, ImageError) as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"Image {i}: {exc}") from exc
+    return UserMessage(content=blocks)
 
 
 # TS: the decorator registers the handler, like router.post("/", handler). The parameter and return types
@@ -155,7 +204,13 @@ def no_transform(response: Response) -> None:
 
 @router.post("/{session_id}/messages", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
 async def send_message(
-    body: PromptCreate, run: RunDep, store: StoreDep, settings: SettingsDep, runs: RunsDep, catalog: CatalogDep
+    # Listed before `run`, so a bad image is refused before the run's slot is claimed.
+    prompt: Annotated[UserMessage, Depends(prompt_message)],
+    run: RunDep,
+    store: StoreDep,
+    settings: SettingsDep,
+    runs: RunsDep,
+    catalog: CatalogDep,
 ) -> AsyncIterable[AgentEvent]:
     """Start a run on a new user message and stream its events as SSE.
 
@@ -165,8 +220,8 @@ async def send_message(
     """
     # Untitled sessions take their title from the first prompt.
     if run.session.title is None:
-        await store.set_title(run.session, body.content[:80])
-    async for event in stream_run(run, UserMessage(content=body.content), settings, runs, context_window(run, catalog)):
+        await store.set_title(run.session, prompt.text()[:80] or "Image")
+    async for event in stream_run(run, prompt, settings, runs, model_lookup(run, catalog)):
         yield event
 
 
@@ -190,7 +245,7 @@ async def continue_run(
     Streams like `POST .../messages`. 409 if a run is going, 422 if the transcript
     is empty or ends with the agent's reply (pi's `agentLoopContinue`).
     """
-    async for event in stream_run(run, None, settings, runs, context_window(run, catalog)):
+    async for event in stream_run(run, None, settings, runs, model_lookup(run, catalog)):
         yield event
 
 
@@ -234,26 +289,26 @@ async def compact_session(
         yield event
 
 
-# Looks up the session model's context window when the run needs it; None when the catalog doesn't know.
-type ContextWindow = Callable[[], Awaitable[int | None]]
+# Looks up the session model in the catalog when the run needs it; None when the catalog doesn't know it.
+type ModelLookup = Callable[[], Awaitable[ModelInfo | None]]
 
 
-def context_window(run: Run, catalog: OpenRouterCatalog) -> ContextWindow:
-    """How the run finds its model's window: from the model catalog (ADR-005), fetched only if asked."""
+def model_lookup(run: Run, catalog: OpenRouterCatalog) -> ModelLookup:
+    """How the run finds what its model can do (window, images): from the catalog (ADR-005), fetched only if asked."""
 
-    async def lookup() -> int | None:
-        """The window in tokens, or None if the catalog can't be reached or doesn't list the model."""
+    async def lookup() -> ModelInfo | None:
+        """The model's catalog entry, or None if the catalog can't be reached or doesn't list it."""
         try:
             models = await catalog.models()
         except CatalogError:
             return None
-        return next((m.context_length for m in models if m.id == run.session.model), None)
+        return next((m for m in models if m.id == run.session.model), None)
 
     return lookup
 
 
 async def stream_run(
-    run: Run, prompt: UserMessage | None, settings: Settings, runs: RunManager, window: ContextWindow
+    run: Run, prompt: UserMessage | None, settings: Settings, runs: RunManager, lookup_model: ModelLookup
 ) -> AsyncIterator[AgentEvent]:
     """Start the claimed run in the background, on a prompt or continuing, and yield its events to this client.
 
@@ -267,6 +322,15 @@ async def stream_run(
 
     async def agent(emit: Emit, prompt: UserMessage | None) -> None:
         """One pass of the agent loop over what the model reads of the transcript so far."""
+        info = await lookup_model()
+        # Only when the catalog says so: an unknown model gets the images, and a refusal is a normal error.
+        blind = info is not None and not info.image_input
+
+        def to_llm(messages: list[AgentMessage]) -> list[Message]:
+            """The default conversion, with images swapped for a note when the model can't see them (ADR-015)."""
+            converted = convert_to_llm(messages)
+            return strip_images(converted) if blind else converted
+
         await run_loop(
             provider=run.provider,
             model=session.model,
@@ -283,6 +347,7 @@ async def stream_run(
             config=LoopConfig(
                 get_steering_messages=run.active.take_steering,
                 get_follow_up_messages=run.active.take_follow_ups,
+                convert_to_llm=to_llm,
             ),
             emit=emit,
         )
@@ -305,7 +370,8 @@ async def stream_run(
         # Checked first, so a short session never needs the catalog.
         if not can_compact(run.active.messages, settings.compaction_keep_recent_tokens):
             return False
-        limit = await window()
+        info = await lookup_model()
+        limit = info.context_length if info else None
         tokens = context_tokens(build_context(run.active.messages))
         return limit is not None and tokens > limit - settings.compaction_reserve_tokens
 

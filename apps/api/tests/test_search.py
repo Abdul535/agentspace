@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from agentspace.agent.tool import ToolContext, ToolError, ToolResult
+from agentspace.ai.messages import joined_text
 from agentspace.tools.find import FindParams, FindTool
 from agentspace.tools.grep import MAX_LINE_CHARS, GrepParams, GrepTool
 from agentspace.tools.ls import LsParams, LsTool
@@ -36,7 +37,7 @@ def ctx(tmp_path: Path) -> ToolContext:
 
 
 def text(result: ToolResult) -> str:
-    return result.content[0].text
+    return joined_text(result.content)
 
 
 async def grep(ctx: ToolContext, pattern: str, **kwargs: object) -> ToolResult:

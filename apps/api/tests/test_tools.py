@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from agentspace.agent.tool import ToolContext, ToolError, ToolResult
+from agentspace.ai.messages import joined_text
 from agentspace.tools.edit import EditParams, EditTool, Replacement
 from agentspace.tools.file_lock import _entries, file_lock
 from agentspace.tools.read import MAX_BYTES, MAX_LINES, ReadParams, ReadTool
@@ -25,12 +26,12 @@ async def read_result(ctx: ToolContext, path: str, offset: int | None = None, li
 
 
 async def read(ctx: ToolContext, path: str, offset: int | None = None, limit: int | None = None) -> str:
-    return (await read_result(ctx, path, offset, limit)).content[0].text
+    return joined_text((await read_result(ctx, path, offset, limit)).content)
 
 
 async def test_write_creates_parent_dirs_and_read_returns_content(ctx: ToolContext) -> None:
     out = await WriteTool().execute(WriteParams(path="a/b/notes.txt", content="one\ntwo\n"), ctx)
-    assert out.content[0].text == "Wrote 8 bytes to a/b/notes.txt"
+    assert joined_text(out.content) == "Wrote 8 bytes to a/b/notes.txt"
     assert out.details == {"path": "a/b/notes.txt", "bytes": 8}
     assert (ctx.workspace / "a/b/notes.txt").read_text() == "one\ntwo\n"
     assert await read(ctx, "a/b/notes.txt") == "one\ntwo"
@@ -119,7 +120,7 @@ async def edit(ctx: ToolContext, path: str, *pairs: tuple[str, str]) -> ToolResu
 async def test_edit_applies_disjoint_edits_against_the_original(ctx: ToolContext) -> None:
     (ctx.workspace / "f.py").write_text("a = 1\nb = 2\nc = 3\n")
     out = await edit(ctx, "f.py", ("c = 3", "c = 30"), ("a = 1", "a = 10"))
-    assert out.content[0].text == "Successfully replaced 2 block(s) in f.py."
+    assert joined_text(out.content) == "Successfully replaced 2 block(s) in f.py."
     assert (ctx.workspace / "f.py").read_text() == "a = 10\nb = 2\nc = 30\n"
     assert out.details is not None and out.details["first_changed_line"] == 1
     assert "-a = 1\n+a = 10\n" in out.details["patch"] and "+c = 30\n" in out.details["patch"]
