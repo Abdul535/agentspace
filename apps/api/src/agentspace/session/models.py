@@ -57,3 +57,21 @@ class MessageRow(SQLModel, table=True):
     data: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
     """The message itself (`agentspace.ai.messages.Message`), as JSON."""
     created_at: datetime = Field(default_factory=utcnow)
+
+
+class McpServerRow(SQLModel, table=True):
+    """One MCP server from the settings page and the command that starts it; every enabled one joins every run."""
+
+    __tablename__ = "mcp_servers"
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    name: str = Field(unique=True)
+    """Names its tools `mcp__<name>__<tool>`; letters, digits, `_` and `-` only."""
+    command: str
+    """One executable, not a shell line: e.g. `npx`."""
+    args: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    env: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
+    """Extra environment variables for the process; stored as plain text (ADR-017)."""
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)

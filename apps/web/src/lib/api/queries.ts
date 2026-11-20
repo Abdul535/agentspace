@@ -2,7 +2,14 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { api, errorMessage, type SessionDetail, type ThinkingLevel } from "./client";
+import {
+  api,
+  errorMessage,
+  type McpServerCreate,
+  type McpServerUpdate,
+  type SessionDetail,
+  type ThinkingLevel,
+} from "./client";
 
 export const queryKeys = {
   sessions: ["sessions"] as const,
@@ -10,6 +17,7 @@ export const queryKeys = {
   models: ["models"] as const,
   skills: ["skills"] as const,
   skill: (name: string) => ["skills", name] as const,
+  mcpServers: ["mcp-servers"] as const,
 };
 
 export function useSessions() {
@@ -125,5 +133,71 @@ export function useSkillFile(name: string, path: string) {
     },
     staleTime: 0,
     retry: false,
+  });
+}
+
+// The MCP servers on the settings page, and whether the API starts them at all (ADR-017).
+export function useMcpServers() {
+  return useQuery({
+    queryKey: queryKeys.mcpServers,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/mcp-servers");
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
+  });
+}
+
+// Saves a new MCP server; sessions pick it up on their next message.
+export function useCreateMcpServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: McpServerCreate) => {
+      const { data, error } = await api.POST("/mcp-servers", { body });
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers }),
+  });
+}
+
+// Changes an MCP server; the API restarts its processes with the new settings when next needed.
+export function useUpdateMcpServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, change }: { id: string; change: McpServerUpdate }) => {
+      const { data, error } = await api.PATCH("/mcp-servers/{server_id}", {
+        params: { path: { server_id: id } },
+        body: change,
+      });
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers }),
+  });
+}
+
+// Deletes an MCP server and stops its processes.
+export function useDeleteMcpServer() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await api.DELETE("/mcp-servers/{server_id}", { params: { path: { server_id: id } } });
+      if (error) throw new Error(errorMessage(error));
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.mcpServers }),
+  });
+}
+
+// Starts a server once and lists its tools; a server that fails still answers 200 with `ok: false`.
+export function useTestMcpServer() {
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { data, error } = await api.POST("/mcp-servers/{server_id}/test", {
+        params: { path: { server_id: id } },
+      });
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
   });
 }

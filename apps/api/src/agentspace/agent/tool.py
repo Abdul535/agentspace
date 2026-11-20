@@ -69,10 +69,11 @@ class Tool[P: BaseModel](ABC):
     model's arguments are validated against it before `execute` runs.
     """
 
-    # TS: abstract readonly name / description — each subclass sets them as class-level constants.
-    name: ClassVar[str]
-    description: ClassVar[str]
-    snippet: ClassVar[str]
+    # TS: abstract name / description. Built-in tools set them once on the class; an MCP tool (ADR-017)
+    # sets them per instance, since one class serves every server's tools.
+    name: str
+    description: str
+    snippet: str
     """One line for the system prompt's tool list, after pi's `promptSnippet`."""
     guidelines: ClassVar[tuple[str, ...]] = ()
     """Rules this tool adds to the system prompt, after pi's `promptGuidelines`."""

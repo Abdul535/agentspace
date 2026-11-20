@@ -251,8 +251,12 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
 23. [x] **Skills.** Load skill folders (`SKILL.md`) and list them in the system
     prompt, and let the model read one on demand. *pi:* `core/skills.ts`.
     Done (2026-11-21): ADR-016.
-24. [ ] **MCP tools.** Turn an MCP server's tools into `Tool`s.
+24. [x] **MCP tools.** Turn an MCP server's tools into `Tool`s.
     *pi:* `packages/mcp`, `extensions/mcp/tools.ts`.
+    Built per ADR-017, stage 1: our own stdio client, servers saved in the DB
+    and configured on the web app's `/mcp` page, connected once per session
+    in its workspace, behind `AGENTSPACE_ENABLE_MCP`. HTTP, OAuth, exposure
+    and resources are ADR-017's later stages.
 25. [ ] **Branching.** Fork a session from any message using the existing
     `parent_id` chain. *pi:* `core/session-manager.ts`.
 
