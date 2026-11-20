@@ -58,7 +58,9 @@ here when it lands.
      command, args, env, enabled). The API has `/mcp-servers` routes to list,
      add, change and delete servers, and to test one (connect, then list its
      tools). The web app has an "MCP servers" page that uses them. Every enabled
-     server applies to every session. There are no per-session server lists yet.
+     server applies to every session that has a tool that changes things
+     (`bash`, `edit` or `write`). A read-only session gets no MCP tools, since
+     an MCP tool can write too. There are no per-session server lists yet.
    - **Lifetime.** Connections are made once per session (the owner's
      prediction, matching pi). They start lazily on the session's first run,
      with the session's workspace as the working folder, because a filesystem

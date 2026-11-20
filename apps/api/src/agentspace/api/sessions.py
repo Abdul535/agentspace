@@ -38,7 +38,7 @@ from agentspace.config import Settings
 from agentspace.mcp.manager import McpManager, ServerConfig
 from agentspace.runs import QueueKind, RunManager, RunSnapshot, read_events
 from agentspace.session.models import SessionRow
-from agentspace.tools import TOOL_SETS, ToolSetName, build_tools
+from agentspace.tools import TOOL_SETS, ToolSetName, allows_mcp, build_tools
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])  # TS: a sub-router, like `new Hono().basePath("/sessions")`
 
@@ -400,7 +400,8 @@ async def stream_run(
     async def loop(emit: Emit) -> None:
         """This run: MCP tools, the agent loop, then compaction if the context needs it."""
         # Inside the run, so the stream is already open while slow servers are waited for.
-        if mcp_servers:
+        # Never for a read-only session: an MCP tool can do anything its server does, writes included.
+        if mcp_servers and allows_mcp(session.tools):
             tools.extend(await mcp.tools_for(session.id, run.workspace, mcp_servers))
         await agent(emit, prompt)
         if not settings.compaction_enabled:

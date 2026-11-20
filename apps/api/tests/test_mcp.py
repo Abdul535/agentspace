@@ -226,7 +226,7 @@ def test_a_run_offers_mcp_tools_and_calls_them(client: TestClient, fake: FakePro
     client.post("/mcp-servers", json={"name": "fake", "command": PYTHON, "args": [FAKE_SERVER]})
     off = client.post("/mcp-servers", json={"name": "off", "command": PYTHON, "args": [FAKE_SERVER], "enabled": False})
     assert off.status_code == 201
-    session_id = client.post("/sessions", json={"tool_set": "read_only"}).json()["id"]
+    session_id = client.post("/sessions", json={"tool_set": "coding"}).json()["id"]
     fake.replies = [
         tool_reply(ToolCall(id="c1", name="mcp__fake__echo", arguments={"text": "from mcp"})),
         text_reply("Done."),
@@ -234,9 +234,17 @@ def test_a_run_offers_mcp_tools_and_calls_them(client: TestClient, fake: FakePro
     client.post(f"/sessions/{session_id}/messages", json={"content": "echo"})
 
     names = [t.name for t in fake.contexts[0].tools]
-    assert names[:4] == ["read", "grep", "find", "ls"] and "mcp__fake__echo" in names
+    assert names[:3] == ["read", "edit", "write"] and "mcp__fake__echo" in names
     assert not any(n.startswith("mcp__off__") for n in names)  # disabled servers stay out
     assert "- mcp__fake__echo: [fake] Echo the text back." in fake.contexts[0].system_prompt
     saved = client.get(f"/sessions/{session_id}").json()["messages"]
     result = next(m for m in saved if m["role"] == "tool_result")
     assert result["content"][0]["text"] == "from mcp" and not result["is_error"]
+
+
+def test_a_read_only_session_gets_no_mcp_tools(client: TestClient, fake: FakeProvider) -> None:
+    client.post("/mcp-servers", json={"name": "fake", "command": PYTHON, "args": [FAKE_SERVER]})
+    session_id = client.post("/sessions", json={"tool_set": "read_only"}).json()["id"]
+    fake.replies = [text_reply("ok")]
+    client.post(f"/sessions/{session_id}/messages", json={"content": "hi"})
+    assert [t.name for t in fake.contexts[0].tools] == ["read", "grep", "find", "ls"]
