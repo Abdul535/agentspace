@@ -118,7 +118,7 @@
           "sessions"
         ],
         "summary": "Update Session",
-        "description": "Switch the session's model; the next run uses it. 409 while a run is in progress.\n\nA real switch also leaves a notice in the transcript for the reader; the model never sees it (ADR-008).",
+        "description": "Switch the session's model or thinking level; the next run uses them. 409 while a run is in progress.\n\nA real switch also leaves a notice in the transcript for the reader; the model never sees it (ADR-008).",
         "operationId": "update_session_sessions__session_id__patch",
         "parameters": [
           {
@@ -744,6 +744,9 @@
             "items": {
               "oneOf": [
                 {
+                  "$ref": "#/components/schemas/ThinkingContent"
+                },
+                {
                   "$ref": "#/components/schemas/TextContent"
                 },
                 {
@@ -754,6 +757,7 @@
                 "propertyName": "type",
                 "mapping": {
                   "text": "#/components/schemas/TextContent",
+                  "thinking": "#/components/schemas/ThinkingContent",
                   "tool_call": "#/components/schemas/ToolCall"
                 }
               }
@@ -775,7 +779,8 @@
             "default": {
               "input": 0,
               "output": 0,
-              "total": 0
+              "total": 0,
+              "reasoning": 0
             }
           },
           "stop_reason": {
@@ -804,7 +809,7 @@
           "model"
         ],
         "title": "AssistantMessage",
-        "description": "One model reply: text and tool calls, plus how and why it ended."
+        "description": "One model reply: thinking, text and tool calls, plus how and why it ended."
       },
       "CompactionEndEvent": {
         "properties": {
@@ -970,6 +975,9 @@
           "event": {
             "oneOf": [
               {
+                "$ref": "#/components/schemas/ThinkingDeltaEvent"
+              },
+              {
                 "$ref": "#/components/schemas/TextDeltaEvent"
               },
               {
@@ -981,6 +989,7 @@
               "propertyName": "type",
               "mapping": {
                 "text_delta": "#/components/schemas/TextDeltaEvent",
+                "thinking_delta": "#/components/schemas/ThinkingDeltaEvent",
                 "tool_call_end": "#/components/schemas/ToolCallEndEvent"
               }
             }
@@ -1069,6 +1078,11 @@
               }
             ],
             "title": "Output Price"
+          },
+          "reasoning": {
+            "type": "boolean",
+            "title": "Reasoning",
+            "default": false
           }
         },
         "type": "object",
@@ -1213,6 +1227,16 @@
               }
             ]
           },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThinkingLevel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "title": {
             "anyOf": [
               {
@@ -1265,6 +1289,9 @@
             "type": "array",
             "title": "Tools"
           },
+          "thinking_level": {
+            "$ref": "#/components/schemas/ThinkingLevel"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -1300,6 +1327,7 @@
           "model",
           "system_prompt",
           "tools",
+          "thinking_level",
           "created_at",
           "updated_at",
           "messages",
@@ -1344,6 +1372,9 @@
             "type": "array",
             "title": "Tools"
           },
+          "thinking_level": {
+            "$ref": "#/components/schemas/ThinkingLevel"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -1368,6 +1399,7 @@
           "model",
           "system_prompt",
           "tools",
+          "thinking_level",
           "created_at",
           "updated_at"
         ],
@@ -1377,17 +1409,31 @@
       "SessionUpdate": {
         "properties": {
           "model": {
-            "type": "string",
-            "minLength": 1,
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Model"
+          },
+          "thinking_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ThinkingLevel"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
-        "required": [
-          "model"
-        ],
         "title": "SessionUpdate",
-        "description": "Fields to change on a session; only `model` for now (ADR-005)."
+        "description": "Fields to change on a session: the model (ADR-005) and how hard it thinks (ADR-012); unset ones stay."
       },
       "StopReason": {
         "type": "string",
@@ -1438,6 +1484,67 @@
         ],
         "title": "TextDeltaEvent",
         "description": "A new piece of reply text."
+      },
+      "ThinkingContent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "thinking",
+            "title": "Type",
+            "default": "thinking"
+          },
+          "thinking": {
+            "type": "string",
+            "title": "Thinking"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thinking"
+        ],
+        "title": "ThinkingContent",
+        "description": "The model's reasoning before its answer; shown in the UI and sent back to the same model (ADR-012)."
+      },
+      "ThinkingDeltaEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "thinking_delta",
+            "title": "Type",
+            "default": "thinking_delta"
+          },
+          "delta": {
+            "type": "string",
+            "title": "Delta"
+          }
+        },
+        "type": "object",
+        "required": [
+          "delta"
+        ],
+        "title": "ThinkingDeltaEvent",
+        "description": "A new piece of the model's reasoning, streamed before its answer."
+      },
+      "ThinkingLevel": {
+        "type": "string",
+        "enum": [
+          "off",
+          "minimal",
+          "low",
+          "medium",
+          "high"
+        ]
       },
       "ToolCall": {
         "properties": {
@@ -1747,6 +1854,11 @@
           "total": {
             "type": "integer",
             "title": "Total",
+            "default": 0
+          },
+          "reasoning": {
+            "type": "integer",
+            "title": "Reasoning",
             "default": 0
           }
         },

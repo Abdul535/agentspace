@@ -24,7 +24,7 @@ from pydantic import BaseModel, Field
 from agentspace.agent.messages import AgentMessage
 from agentspace.agent.tool import ToolResult
 from agentspace.ai.messages import AssistantMessage, ToolResultMessage
-from agentspace.ai.provider import TextDeltaEvent, ToolCallEndEvent
+from agentspace.ai.provider import TextDeltaEvent, ThinkingDeltaEvent, ToolCallEndEvent
 
 # Why a run stopped: the model answered, it hit max_turns, the provider failed, it was cancelled,
 # every tool call in the last batch asked to stop (`ToolResult.terminate`), or `finish_turn` returned "end".
@@ -59,7 +59,7 @@ class MessageUpdateEvent(BaseModel):
     """Assistant messages only: one streamed piece of the message being generated."""
 
     type: Literal["message_update"] = "message_update"
-    event: Annotated[TextDeltaEvent | ToolCallEndEvent, Field(discriminator="type")]
+    event: Annotated[ThinkingDeltaEvent | TextDeltaEvent | ToolCallEndEvent, Field(discriminator="type")]
 
 
 class MessageEndEvent(BaseModel):

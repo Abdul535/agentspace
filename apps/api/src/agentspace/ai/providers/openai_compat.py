@@ -15,6 +15,7 @@ from agentspace.ai.messages import (
     Message,
     StopReason,
     TextContent,
+    ThinkingContent,
     ToolCall,
     ToolResultMessage,
     Usage,
@@ -27,6 +28,7 @@ from agentspace.ai.provider import (
     ErrorEvent,
     StartEvent,
     TextDeltaEvent,
+    ThinkingDeltaEvent,
     ToolCallEndEvent,
     prepare_transcript,
 )
@@ -41,6 +43,11 @@ FINISH_REASONS: dict[str, StopReason] = {
     "function_call": "tool_use",
     "length": "length",
 }
+
+# Where a stream's reasoning text can arrive, in the order we look: OpenRouter sends `reasoning`,
+# llama.cpp and DeepSeek send `reasoning_content`. Only the first one present is read, since some
+# endpoints send the same text in two of them (pi's `reasoningFields`).
+REASONING_FIELDS = ("reasoning_content", "reasoning", "reasoning_text")
 
 
 class OpenAICompatProvider:
@@ -69,12 +76,18 @@ class OpenAICompatProvider:
         """The JSON body for `/chat/completions`, with usage reported in the last chunk."""
         body: dict[str, Any] = {
             "model": model,
-            "messages": to_wire_messages(context.system_prompt, prepare_transcript(context.messages)),
+            "messages": to_wire_messages(
+                context.system_prompt, prepare_transcript(context.messages), provider=self.name, model=model
+            ),
             "stream": True,
             "stream_options": {"include_usage": True},
         }
         if context.max_tokens is not None:
             body["max_tokens"] = context.max_tokens
+        # OpenRouter's one reasoning switch for every vendor. "off" sends nothing rather than
+        # `effort: "none"`, which models that always think refuse (ADR-012).
+        if context.thinking_level != "off":
+            body["reasoning"] = {"effort": context.thinking_level}
         if context.tools:
             body["tools"] = [
                 {
@@ -97,6 +110,11 @@ class OpenAICompatProvider:
         headers = {"Authorization": f"Bearer {self.api_key}", **self.headers}
         body = self.build_request_body(model, context)
         text = ""
+        thinking = ""
+        # The wire field the thinking text came in, so it can be sent back the same way.
+        thinking_field: str | None = None
+        # Structured reasoning (some of it signed or encrypted) that the model needs back after a tool call.
+        details: list[dict[str, Any]] = []
         # Tool calls arrive in fragments keyed by index; their arguments JSON is concatenated.
         calls: dict[int, dict[str, str]] = {}
         finish_reason: str | None = None
@@ -124,9 +142,21 @@ class OpenAICompatProvider:
                                 input=usage.get("prompt_tokens") or 0,  # TS: `or` acts like `||`, not `??`
                                 output=usage.get("completion_tokens") or 0,
                                 total=usage.get("total_tokens") or 0,
+                                reasoning=(usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0,
                             )
                         for choice in chunk.get("choices") or []:
                             delta = choice.get("delta") or {}
+                            # Read before `content`: a proxy can put reasoning and answer in one chunk.
+                            for field in REASONING_FIELDS:
+                                piece = delta.get(field)
+                                if isinstance(piece, str) and piece:
+                                    thinking_field = thinking_field or field
+                                    thinking += piece
+                                    yield ThinkingDeltaEvent(delta=piece)
+                                    break
+                            for detail in delta.get("reasoning_details") or []:
+                                if isinstance(detail, dict):
+                                    add_reasoning_detail(details, detail)
                             if content := delta.get("content"):
                                 text += content
                                 yield TextDeltaEvent(delta=content)
@@ -140,13 +170,17 @@ class OpenAICompatProvider:
                                 finish_reason = choice["finish_reason"]
         # TS: a catch that only handles these error classes; any other exception keeps propagating.
         except (httpx.HTTPError, ProviderError, json.JSONDecodeError) as exc:
-            # Keep the text that arrived before the failure so it can be shown.
-            output.content = [TextContent(text=text)] if text else []
+            # Keep the thinking and text that arrived before the failure so they can be shown.
+            output.content = thinking_blocks(thinking, thinking_field, details)
+            if text:
+                output.content.append(TextContent(text=text))
             output.stop_reason = "error"
             output.error_message = str(exc) or type(exc).__name__
             yield ErrorEvent(message=output)
             return
 
+        # Thinking first, then the answer, then tool calls: the order the model produced them.
+        output.content = thinking_blocks(thinking, thinking_field, details)
         if text:
             output.content.append(TextContent(text=text))
         # Arguments are only complete once the stream ends, so tool calls are parsed here.
@@ -198,6 +232,59 @@ def error_detail(body: str) -> str:
     return body[:500]
 
 
+def add_reasoning_detail(details: list[dict[str, Any]], detail: dict[str, Any]) -> None:
+    """Add one streamed reasoning detail, joining it to the last one when both are pieces of the same text.
+
+    OpenRouter streams `reasoning_details` in fragments: text and summary pieces are joined
+    into one entry, encrypted entries stay whole (pi's `appendOpenAIReasoningDetail`).
+    """
+    last = details[-1] if details else None
+    kind = detail.get("type")
+    key = {"reasoning.text": "text", "reasoning.summary": "summary"}.get(kind or "")
+    if key and last is not None and last.get("type") == kind:
+        last[key] = (last.get(key) or "") + (detail.get(key) or "")
+        # Fields like `signature` and `id` arrive once, often on the last fragment.
+        for field, value in detail.items():
+            if field != key and value is not None and last.get(field) is None:
+                last[field] = value
+        return
+    details.append(dict(detail))  # TS: { ...detail }, a shallow copy
+
+
+def thinking_blocks(
+    thinking: str, field: str | None, details: list[dict[str, Any]]
+) -> list[ThinkingContent | TextContent | ToolCall]:
+    """The reply's thinking as a one-item content list, or empty when the model didn't think.
+
+    The details list wins as the signature: it is the provider's own record, signed parts included.
+    """
+    if not thinking and not details:
+        return []
+    signature = json.dumps(details) if details else field
+    return [ThinkingContent(thinking=thinking, signature=signature)]
+
+
+def replay_thinking(message: AssistantMessage, *, provider: str, model: str) -> dict[str, Any]:
+    """Fields that send a reply's thinking back to the model that wrote it; empty for any other model.
+
+    Signed reasoning from another model is refused or meaningless, so it is never sent across.
+    """
+    if message.provider != provider or message.model != model:
+        return {}
+    for block in message.content:
+        if not isinstance(block, ThinkingContent) or not block.signature:
+            continue
+        if block.signature in REASONING_FIELDS:
+            return {block.signature: message.thinking()}
+        try:
+            details = json.loads(block.signature)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(details, list) and details:
+            return {"reasoning_details": details}
+    return {}
+
+
 def parse_tool_call(raw: dict[str, str]) -> ToolCall:
     """Decode a streamed call's arguments; bad JSON is kept as `arguments_error`, not raised."""
     try:
@@ -213,8 +300,8 @@ def parse_tool_call(raw: dict[str, str]) -> ToolCall:
     return ToolCall(id=raw["id"], name=raw["name"], arguments=arguments)
 
 
-def to_wire_messages(system_prompt: str, messages: list[Message]) -> list[dict[str, Any]]:
-    """Convert our transcript to the Chat Completions `messages` array."""
+def to_wire_messages(system_prompt: str, messages: list[Message], *, provider: str, model: str) -> list[dict[str, Any]]:
+    """Convert our transcript to the Chat Completions `messages` array, for a request to `provider`'s `model`."""
     wire: list[dict[str, Any]] = []
     if system_prompt:
         wire.append({"role": "system", "content": system_prompt})
@@ -225,6 +312,7 @@ def to_wire_messages(system_prompt: str, messages: list[Message]) -> list[dict[s
                 wire.append({"role": "user", "content": message.content})
             case AssistantMessage():
                 entry: dict[str, Any] = {"role": "assistant", "content": message.text() or None}
+                entry.update(replay_thinking(message, provider=provider, model=model))
                 if calls := message.tool_calls():
                     # TS: calls.map((call) => ({ id: call.id, type: "function", function: {...} }))
                     entry["tool_calls"] = [

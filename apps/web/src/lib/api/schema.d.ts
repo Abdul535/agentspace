@@ -47,7 +47,7 @@ export interface paths {
         head?: never;
         /**
          * Update Session
-         * @description Switch the session's model; the next run uses it. 409 while a run is in progress.
+         * @description Switch the session's model or thinking level; the next run uses them. 409 while a run is in progress.
          *
          *     A real switch also leaves a notice in the transcript for the reader; the model never sees it (ADR-008).
          */
@@ -258,7 +258,7 @@ export interface components {
         };
         /**
          * AssistantMessage
-         * @description One model reply: text and tool calls, plus how and why it ended.
+         * @description One model reply: thinking, text and tool calls, plus how and why it ended.
          */
         AssistantMessage: {
             /**
@@ -270,7 +270,7 @@ export interface components {
              * Content
              * @default []
              */
-            content: (components["schemas"]["TextContent"] | components["schemas"]["ToolCall"])[];
+            content: (components["schemas"]["ThinkingContent"] | components["schemas"]["TextContent"] | components["schemas"]["ToolCall"])[];
             /** Provider */
             provider: string;
             /** Model */
@@ -279,7 +279,8 @@ export interface components {
              * @default {
              *       "input": 0,
              *       "output": 0,
-             *       "total": 0
+             *       "total": 0,
+             *       "reasoning": 0
              *     }
              */
             usage: components["schemas"]["Usage"];
@@ -379,7 +380,7 @@ export interface components {
              */
             type: "message_update";
             /** Event */
-            event: components["schemas"]["TextDeltaEvent"] | components["schemas"]["ToolCallEndEvent"];
+            event: components["schemas"]["ThinkingDeltaEvent"] | components["schemas"]["TextDeltaEvent"] | components["schemas"]["ToolCallEndEvent"];
         };
         /**
          * ModelCatalog
@@ -410,6 +411,11 @@ export interface components {
             input_price: number | null;
             /** Output Price */
             output_price: number | null;
+            /**
+             * Reasoning
+             * @default false
+             */
+            reasoning: boolean;
         };
         /**
          * NoticeMessage
@@ -468,6 +474,7 @@ export interface components {
             /** System Prompt */
             system_prompt?: string | null;
             tool_set?: components["schemas"]["ToolSetName"] | null;
+            thinking_level?: components["schemas"]["ThinkingLevel"] | null;
             /** Title */
             title?: string | null;
         };
@@ -488,6 +495,7 @@ export interface components {
             system_prompt: string;
             /** Tools */
             tools: string[];
+            thinking_level: components["schemas"]["ThinkingLevel"];
             /**
              * Created At
              * Format: date-time
@@ -525,6 +533,7 @@ export interface components {
             system_prompt: string;
             /** Tools */
             tools: string[];
+            thinking_level: components["schemas"]["ThinkingLevel"];
             /**
              * Created At
              * Format: date-time
@@ -543,11 +552,12 @@ export interface components {
         };
         /**
          * SessionUpdate
-         * @description Fields to change on a session; only `model` for now (ADR-005).
+         * @description Fields to change on a session: the model (ADR-005) and how hard it thinks (ADR-012); unset ones stay.
          */
         SessionUpdate: {
             /** Model */
-            model: string;
+            model?: string | null;
+            thinking_level?: components["schemas"]["ThinkingLevel"] | null;
         };
         /** @enum {string} */
         StopReason: "stop" | "length" | "tool_use" | "error" | "aborted";
@@ -577,6 +587,36 @@ export interface components {
             /** Delta */
             delta: string;
         };
+        /**
+         * ThinkingContent
+         * @description The model's reasoning before its answer; shown in the UI and sent back to the same model (ADR-012).
+         */
+        ThinkingContent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "thinking";
+            /** Thinking */
+            thinking: string;
+            /** Signature */
+            signature?: string | null;
+        };
+        /**
+         * ThinkingDeltaEvent
+         * @description A new piece of the model's reasoning, streamed before its answer.
+         */
+        ThinkingDeltaEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "thinking_delta";
+            /** Delta */
+            delta: string;
+        };
+        /** @enum {string} */
+        ThinkingLevel: "off" | "minimal" | "low" | "medium" | "high";
         /**
          * ToolCall
          * @description The model asking to run one tool with JSON arguments.
@@ -761,6 +801,11 @@ export interface components {
              * @default 0
              */
             total: number;
+            /**
+             * Reasoning
+             * @default 0
+             */
+            reasoning: number;
         };
         /**
          * UserMessage

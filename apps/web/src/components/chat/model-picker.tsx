@@ -14,13 +14,13 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { ModelInfo } from "@/lib/api/client";
-import { useModels, useSetSessionModel } from "@/lib/api/queries";
+import { useModels, useUpdateSession } from "@/lib/api/queries";
 
 /** The session's model, as a searchable picker that switches it for the next run (ADR-005). */
 export function ModelPicker({ sessionId, model, running }: { sessionId: string; model: string; running: boolean }) {
   const [open, setOpen] = useState(false);
   const catalog = useModels();
-  const setModel = useSetSessionModel(sessionId);
+  const setModel = useUpdateSession(sessionId);
 
   const models = catalog.data?.models ?? [];
   const favoriteIds = new Set(catalog.data?.favorites ?? []);
@@ -31,7 +31,7 @@ export function ModelPicker({ sessionId, model, running }: { sessionId: string; 
 
   function select(id: string) {
     if (id === model) return setOpen(false);
-    setModel.mutate(id, { onSuccess: () => setOpen(false) });
+    setModel.mutate({ model: id }, { onSuccess: () => setOpen(false) });
   }
 
   return (
@@ -44,7 +44,7 @@ export function ModelPicker({ sessionId, model, running }: { sessionId: string; 
           disabled={running || setModel.isPending}
           title={running ? "Wait for the run to finish to switch models" : "Switch model"}
         >
-          <span className="truncate">{setModel.isPending ? setModel.variables : model}</span>
+          <span className="truncate">{setModel.isPending ? setModel.variables.model : model}</span>
           {setModel.isPending ? <LoaderCircle className="animate-spin" /> : <ChevronsUpDown />}
         </Button>
       </PopoverTrigger>

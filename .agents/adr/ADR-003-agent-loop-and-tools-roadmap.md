@@ -221,9 +221,12 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
     *pi:* `core/compaction/`, `prepareNextTurn`.
     Built per ADR-009: compaction only; `transform_context` is deferred there
     (an overflow mid-run is compacted and continued instead).
-18. [ ] **Thinking / reasoning.** Thinking content blocks in `AssistantMessage`, a
+18. [x] **Thinking / reasoning.** Thinking content blocks in `AssistantMessage`, a
     per-session `thinking_level`, and thinking deltas streamed to the UI.
     *pi:* `ThinkingLevel`, `thinking_*` events.
+    Built per ADR-012: `ThinkingContent` with a `signature` for sending it back to
+    the same model, `sessions.thinking_level` (`off` sends no `reasoning` field),
+    `thinking_delta` events, and a picker for models the catalog says can reason.
 19. [ ] **`prepare_request`.** Swap the model, thinking level or context right
     before each provider call, for example a cheaper model for simple turns.
     *pi:* `PrepareRequest`.

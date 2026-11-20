@@ -19,6 +19,7 @@ export type ToolCall = Schemas["ToolCall"];
 export type AgentEvent = Schemas["AgentEvent"];
 export type RunSnapshot = Schemas["RunSnapshot"];
 export type ModelInfo = Schemas["ModelInfo"];
+export type ThinkingLevel = Schemas["ThinkingLevel"];
 
 /** Turn an openapi-fetch error body into a readable message. */
 export function errorMessage(error: unknown): string {

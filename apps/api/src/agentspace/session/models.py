@@ -11,8 +11,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Column, UniqueConstraint
+from sqlalchemy import JSON, Column, String, UniqueConstraint
 from sqlmodel import Field, SQLModel
+
+from agentspace.ai.messages import ThinkingLevel
 
 
 def utcnow() -> datetime:
@@ -22,7 +24,7 @@ def utcnow() -> datetime:
 
 # TS: like a Drizzle table definition: one class is both the table schema and the row type.
 class SessionRow(SQLModel, table=True):
-    """One session: which provider and model it uses, and its system prompt."""
+    """One session: which provider and model it uses, how hard it thinks, and its system prompt."""
 
     __tablename__ = "sessions"
 
@@ -34,6 +36,9 @@ class SessionRow(SQLModel, table=True):
     system_prompt: str
     tools: list[str] = Field(sa_column=Column(JSON, nullable=False))
     """Names of the tools the agent may call, in order; `bash` still needs the server to enable it."""
+    # A plain string column: SQLModel can't map a Literal type itself, so the column is spelled out.
+    thinking_level: ThinkingLevel = Field(default="off", sa_column=Column(String, nullable=False))
+    """How hard the model thinks on this session's runs (ADR-012)."""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
