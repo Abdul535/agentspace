@@ -52,8 +52,10 @@ SUMMARY_SUFFIX = "\n</summary>"
 
 
 def escape_summary(text: str) -> str:
-    """The summary with its wrapper tags defanged, so text inside it can't close the wrapper early."""
-    return text.replace("<summary>", "&lt;summary&gt;").replace("</summary>", "&lt;/summary&gt;")
+    """The summary with every angle bracket escaped, so no tag inside it can close the wrapper early."""
+    # Every `<` and `>`, not just `</summary>`: `</SUMMARY>` or `</summary >` would get past a narrower match.
+    # Ampersands first, so an existing `&lt;` in the text stays readable instead of turning into `<`.
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def convert_to_llm(messages: list[AgentMessage]) -> list[Message]:
