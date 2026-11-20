@@ -16,3 +16,6 @@ node_modules/
 # Personal learning notes, kept local
 .agents/learning-plan.md
 .agents/debug-sessions/
+
+# Per-worktree ports, written by scripts/worktree-setup.sh (ADR-011)
+.worktree.env
