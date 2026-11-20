@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api, errorMessage, type Message } from "./client";
 import { queryKeys } from "./queries";
-import { type RunStreamEvent, streamContinue, streamPrompt, watchRun } from "./stream";
+import { type RunStreamEvent, streamCompact, streamContinue, streamPrompt, watchRun } from "./stream";
 
 /** Where a message typed during a run goes: after the current turn, or once the run would stop. */
 export type QueueKind = "steer" | "follow_up";
@@ -25,6 +25,8 @@ type RunState = {
   pendingTools: Set<string>;
   /** Latest live output of running tool calls (e.g. bash so far), by call id. Each update replaces the last. */
   toolOutput: Map<string, string>;
+  /** The run is summarizing older messages (ADR-009). */
+  compacting: boolean;
   error: string | null;
 };
 
@@ -35,6 +37,7 @@ const idle: RunState = {
   draft: null,
   pendingTools: new Set(),
   toolOutput: new Map(),
+  compacting: false,
   error: null,
 };
 
@@ -67,6 +70,10 @@ function reduce(s: RunState, event: RunStreamEvent): RunState {
       toolOutput.delete(event.result.tool_call_id);
       return { ...s, pendingTools, toolOutput };
     }
+    case "compaction_start":
+      return { ...s, compacting: true };
+    case "compaction_end":
+      return { ...s, compacting: false };
     default:
       return s;
   }
@@ -104,6 +111,8 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
           const index = queuedRef.current.findIndex((q) => q.content === content);
           if (index !== -1) updateQueued(queuedRef.current.toSpliced(index, 1));
         }
+        // A failed compaction leaves no message behind, so its reason is kept to show once the run ends.
+        if (event.type === "compaction_end" && event.error) error = event.error;
         setState((s) => reduce(s, event));
       }
     } catch (e) {
@@ -151,6 +160,11 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
     void listen((signal) => streamContinue(sessionId, signal));
   }
 
+  // Summarize the older part of the transcript now, instead of waiting for it to near the window.
+  function compact() {
+    void listen((signal) => streamCompact(sessionId, signal));
+  }
+
   function updateQueued(next: QueuedMessage[]) {
     queuedRef.current = next;
     setQueued(next);
@@ -176,5 +190,5 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
     await api.POST("/sessions/{session_id}/abort", { params: { path: { session_id: sessionId } } });
   }
 
-  return { ...state, queued, send, queue, stop, resume };
+  return { ...state, queued, send, queue, stop, resume, compact };
 }

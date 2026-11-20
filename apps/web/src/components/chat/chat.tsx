@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, PanelRightClose, PanelRightOpen, RotateCw } from "lucide-react";
+import { AlertCircle, FoldVertical, Loader2, PanelRightClose, PanelRightOpen, RotateCw } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ActivityPanel } from "@/components/chat/activity-panel";
@@ -57,6 +57,18 @@ export function Chat({ sessionId }: { sessionId: string }) {
           ) : (
             <Skeleton className="mr-auto h-4 w-48" />
           )}
+          {session.data && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={run.running}
+              title="Summarize older messages so the model reads less"
+              onClick={run.compact}
+            >
+              <FoldVertical />
+              Compact
+            </Button>
+          )}
           {/* Hidden below lg, where the panel itself is hidden. */}
           <Button
             variant="ghost"
@@ -97,9 +109,16 @@ export function Chat({ sessionId }: { sessionId: string }) {
           {run.error && (
             <Alert variant="destructive" className="mb-3">
               <AlertCircle />
-              <AlertTitle>Couldn&apos;t send</AlertTitle>
+              {/* Neutral: a prompt, Continue, Compact or a compaction after a run can each land here. */}
+              <AlertTitle>Something went wrong</AlertTitle>
               <AlertDescription>{run.error}</AlertDescription>
             </Alert>
+          )}
+          {run.compacting && (
+            <p role="status" className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Compacting older messages…
+            </p>
           )}
           {/* The last run stopped (error, Stop, server restart) before the agent replied: offer to pick it up. */}
           {!run.running && session.data?.can_continue && (

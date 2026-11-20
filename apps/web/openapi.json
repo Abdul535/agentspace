@@ -305,6 +305,71 @@
         }
       }
     },
+    "/sessions/{session_id}/compact": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Compact Session",
+        "description": "Summarize the older part of the transcript now (ADR-009); streams the run's events like `.../continue`.\n\n409 if a run is going, 422 if the conversation is too short to compact.",
+        "operationId": "compact_session_sessions__session_id__compact_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/event-stream": {
+                "itemSchema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "string",
+                      "contentMediaType": "application/json",
+                      "contentSchema": {
+                        "$ref": "#/components/schemas/AgentEvent"
+                      }
+                    },
+                    "event": {
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "retry": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/events": {
       "get": {
         "tags": [
@@ -599,6 +664,12 @@
           },
           {
             "$ref": "#/components/schemas/AgentEndEvent"
+          },
+          {
+            "$ref": "#/components/schemas/CompactionStartEvent"
+          },
+          {
+            "$ref": "#/components/schemas/CompactionEndEvent"
           }
         ],
         "discriminator": {
@@ -606,6 +677,8 @@
           "mapping": {
             "agent_end": "#/components/schemas/AgentEndEvent",
             "agent_start": "#/components/schemas/AgentStartEvent",
+            "compaction_end": "#/components/schemas/CompactionEndEvent",
+            "compaction_start": "#/components/schemas/CompactionStartEvent",
             "message_end": "#/components/schemas/MessageEndEvent",
             "message_start": "#/components/schemas/MessageStartEvent",
             "message_update": "#/components/schemas/MessageUpdateEvent",
@@ -630,12 +703,16 @@
           },
           {
             "$ref": "#/components/schemas/NoticeMessage"
+          },
+          {
+            "$ref": "#/components/schemas/CompactionSummaryMessage"
           }
         ],
         "discriminator": {
           "propertyName": "role",
           "mapping": {
             "assistant": "#/components/schemas/AssistantMessage",
+            "compaction_summary": "#/components/schemas/CompactionSummaryMessage",
             "notice": "#/components/schemas/NoticeMessage",
             "tool_result": "#/components/schemas/ToolResultMessage",
             "user": "#/components/schemas/UserMessage"
@@ -728,6 +805,97 @@
         ],
         "title": "AssistantMessage",
         "description": "One model reply: text and tool calls, plus how and why it ended."
+      },
+      "CompactionEndEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "compaction_end",
+            "title": "Type",
+            "default": "compaction_end"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CompactionReason"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "CompactionEndEvent",
+        "description": "Compaction finished; on success its summary already came as a `message_end`."
+      },
+      "CompactionReason": {
+        "type": "string",
+        "enum": [
+          "threshold",
+          "overflow",
+          "manual"
+        ]
+      },
+      "CompactionStartEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "compaction_start",
+            "title": "Type",
+            "default": "compaction_start"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/CompactionReason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "title": "CompactionStartEvent",
+        "description": "The run started summarizing the older part of the transcript."
+      },
+      "CompactionSummaryMessage": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "const": "compaction_summary",
+            "title": "Role",
+            "default": "compaction_summary"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "kept": {
+            "type": "integer",
+            "title": "Kept"
+          },
+          "tokens_before": {
+            "type": "integer",
+            "title": "Tokens Before"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary",
+          "kept",
+          "tokens_before"
+        ],
+        "title": "CompactionSummaryMessage",
+        "description": "A summary standing in for the older part of the transcript, so it fits the model's window (ADR-009)."
       },
       "EndReason": {
         "type": "string",

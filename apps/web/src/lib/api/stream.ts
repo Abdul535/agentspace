@@ -35,6 +35,17 @@ export async function* streamContinue(sessionId: string, signal: AbortSignal): A
   );
 }
 
+/** Summarize the older part of the transcript now (ADR-009); streams like `streamPrompt`. */
+export async function* streamCompact(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamEvent> {
+  yield* readEvents(
+    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/compact`, {
+      method: "POST",
+      headers: { accept: "text/event-stream" },
+      signal,
+    }),
+  );
+}
+
 /** Attach to a session's run: a `run_snapshot` first, then live events until the run ends. */
 export async function* watchRun(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamEvent> {
   yield* readEvents(
