@@ -285,6 +285,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/mcp-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Servers
+         * @description Every saved server, by name.
+         */
+        get: operations["list_servers_mcp_servers_get"];
+        put?: never;
+        /**
+         * Create Server
+         * @description Save a server; 409 if its name is taken. Sessions pick it up on their next message.
+         */
+        post: operations["create_server_mcp_servers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mcp-servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Server
+         * @description Delete a server and stop its processes.
+         */
+        delete: operations["delete_server_mcp_servers__server_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Server
+         * @description Change a server; its running processes stop now and start again with the new settings when next needed.
+         */
+        patch: operations["update_server_mcp_servers__server_id__patch"];
+        trace?: never;
+    };
+    "/mcp-servers/{server_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test Server
+         * @description Start the server once, list its tools and stop it. A failure is a result with `ok: false`, not an HTTP error.
+         *
+         *     403 while MCP is off, since this runs the server's command on the host.
+         */
+        post: operations["test_server_mcp_servers__server_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -427,6 +497,124 @@ export interface components {
         ImageInput: {
             /** Data */
             data: string;
+        };
+        /**
+         * McpServerCreate
+         * @description A new stdio server: the command that starts it and its environment.
+         */
+        McpServerCreate: {
+            /** Name */
+            name: string;
+            /** Command */
+            command: string;
+            /**
+             * Args
+             * @default []
+             */
+            args: string[];
+            /**
+             * Env
+             * @default {}
+             */
+            env: {
+                [key: string]: string;
+            };
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /**
+         * McpServerList
+         * @description The saved servers, and whether the API starts them at all.
+         */
+        McpServerList: {
+            /** Mcp Enabled */
+            mcp_enabled: boolean;
+            /** Admin Token Set */
+            admin_token_set: boolean;
+            /** Servers */
+            servers: components["schemas"]["McpServerPublic"][];
+        };
+        /**
+         * McpServerPublic
+         * @description A server as the API returns it.
+         */
+        McpServerPublic: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Command */
+            command: string;
+            /** Args */
+            args: string[];
+            /** Env */
+            env: {
+                [key: string]: string;
+            };
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * McpServerTest
+         * @description The outcome of starting a server and listing its tools.
+         */
+        McpServerTest: {
+            /** Ok */
+            ok: boolean;
+            /** Error */
+            error?: string | null;
+            /** Server Name */
+            server_name?: string | null;
+            /** Server Version */
+            server_version?: string | null;
+            /** Instructions */
+            instructions?: string | null;
+            /**
+             * Tools
+             * @default []
+             */
+            tools: components["schemas"]["McpToolSummary"][];
+        };
+        /**
+         * McpServerUpdate
+         * @description Fields to change on a server; unset ones stay. Its running processes restart on the next message.
+         */
+        McpServerUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Command */
+            command?: string | null;
+            /** Args */
+            args?: string[] | null;
+            /** Env */
+            env?: {
+                [key: string]: string;
+            } | null;
+            /** Enabled */
+            enabled?: boolean | null;
+        };
+        /**
+         * McpToolSummary
+         * @description One tool a server offers, as the test shows it.
+         */
+        McpToolSummary: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
         };
         /**
          * MessageCreate
@@ -1443,6 +1631,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillFile"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_servers_mcp_servers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerList"];
+                };
+            };
+        };
+    };
+    create_server_mcp_servers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_server_mcp_servers__server_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_server_mcp_servers__server_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpServerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_server_mcp_servers__server_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpServerTest"];
                 };
             };
             /** @description Validation Error */

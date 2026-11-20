@@ -30,6 +30,15 @@ TOOL_SETS: dict[ToolSetName, tuple[str, ...]] = {
 }
 
 
+# Tools that change the workspace or run commands; a session without any of them is read-only.
+WRITE_TOOLS = frozenset({"bash", "edit", "write"})
+
+
+def allows_mcp(names: Sequence[str]) -> bool:
+    """Whether a session with these tools gets MCP tools: not a read-only one, since an MCP tool may write (ADR-017)."""
+    return not WRITE_TOOLS.isdisjoint(names)  # TS: names.some((n) => WRITE_TOOLS.has(n))
+
+
 def build_tools(names: Sequence[str], *, bash: bool) -> list[Tool]:
     """Instances of the named tools, in order.
 

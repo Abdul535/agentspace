@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen } from "lucide-react";
+import { BookOpen, Plug } from "lucide-react";
 import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 
@@ -11,7 +11,8 @@ import { cn } from "@/lib/utils";
 
 export function SessionSidebar() {
   const { id: activeId } = useParams<{ id?: string }>();
-  const onSkills = usePathname().startsWith("/skills");
+  const pathname = usePathname();
+  const onSkills = pathname.startsWith("/skills");
   const sessions = useSessions();
 
   return (
@@ -39,17 +40,31 @@ export function SessionSidebar() {
           </Link>
         ))}
       </nav>
-      <Link
-        href="/skills"
-        aria-current={onSkills ? "page" : undefined}
-        className={cn(
-          "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-          "aria-[current=page]:bg-muted aria-[current=page]:text-foreground",
-        )}
-      >
-        <BookOpen className="size-4" strokeWidth={1.5} />
-        Skills
-      </Link>
+      {/* App-wide settings pages, under the session list. */}
+      <div className="flex flex-col gap-0.5">
+        <Link
+          href="/skills"
+          aria-current={onSkills ? "page" : undefined}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+            "aria-[current=page]:bg-muted aria-[current=page]:text-foreground",
+          )}
+        >
+          <BookOpen className="size-4" strokeWidth={1.5} />
+          Skills
+        </Link>
+        <Link
+          href="/mcp"
+          aria-current={pathname === "/mcp" ? "page" : undefined}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
+            "aria-[current=page]:bg-muted aria-[current=page]:text-foreground",
+          )}
+        >
+          <Plug className="size-4" strokeWidth={1.5} />
+          MCP servers
+        </Link>
+      </div>
     </aside>
   );
 }

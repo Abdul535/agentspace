@@ -21,6 +21,11 @@ export type RunSnapshot = Schemas["RunSnapshot"];
 export type ModelInfo = Schemas["ModelInfo"];
 export type ThinkingLevel = Schemas["ThinkingLevel"];
 export type SkillPublic = Schemas["SkillPublic"];
+// MCP servers saved on the settings page (ADR-017).
+export type McpServer = Schemas["McpServerPublic"];
+export type McpServerCreate = Schemas["McpServerCreate"];
+export type McpServerUpdate = Schemas["McpServerUpdate"];
+export type McpServerTest = Schemas["McpServerTest"];
 
 /** Turn an openapi-fetch error body into a readable message. */
 export function errorMessage(error: unknown): string {

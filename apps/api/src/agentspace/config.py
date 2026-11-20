@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     """Tool preset for sessions created without one: `all`, `coding` or `read_only`."""
     enable_bash: bool = False
     """Give sessions the `bash` tool. Off by default: commands run unsandboxed as the API's user (ADR-003)."""
+    enable_mcp: bool = False
+    """Start the saved MCP servers. Off by default: each one runs a command on the host (ADR-017)."""
+    mcp_admin_token: str | None = None
+    """Secret the web page must send to add, change, delete or test MCP servers; those routes refuse all while unset."""
+    mcp_wait_seconds: float = 10
+    """How long a run waits for its MCP servers to connect before going on without the slow ones."""
+    mcp_call_timeout_seconds: float = 60
+    """How long one MCP tool call may take."""
+    mcp_idle_seconds: float = 600
+    """Stop a session's MCP servers after this long without use."""
     auto_migrate: bool = True
     """Apply pending Alembic migrations when the app starts."""
 

@@ -47,6 +47,7 @@ select = ["E", "F", "I", "UP", "B", "FAST"]
 [tool.ruff.lint.per-file-ignores]
 # `session_id` reaches these routes through the SessionRowDep / RunDep dependencies.
 "src/agentspace/api/sessions.py" = ["FAST003"]
+"src/agentspace/api/mcp_servers.py" = ["FAST003"]
 
 [tool.ty.src]
 # A one-off spike that needs the Daytona SDK, which isn't a project dependency.

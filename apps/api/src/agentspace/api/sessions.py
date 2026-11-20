@@ -18,7 +18,7 @@ from agentspace.agent.loop import Emit, can_continue, run_loop
 from agentspace.agent.messages import AgentMessage, NoticeMessage, convert_to_llm
 from agentspace.agent.prompt import build_system_prompt
 from agentspace.agent.skills import load_skills
-from agentspace.agent.tool import ToolContext
+from agentspace.agent.tool import Tool, ToolContext
 from agentspace.ai.catalog import CatalogError, ModelInfo, OpenRouterCatalog
 from agentspace.ai.images import MAX_INPUT_BYTES, ImageError, base64_size, process_image
 from agentspace.ai.messages import (
@@ -33,10 +33,12 @@ from agentspace.ai.messages import (
 from agentspace.ai.overflow import is_context_overflow
 from agentspace.ai.providers import PROVIDERS
 from agentspace.api.deps import CatalogDep, Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
+from agentspace.api.mcp_servers import McpDep, McpServerConfigsDep
 from agentspace.config import Settings
+from agentspace.mcp.manager import McpManager, ServerConfig
 from agentspace.runs import QueueKind, RunManager, RunSnapshot, read_events
 from agentspace.session.models import SessionRow
-from agentspace.tools import TOOL_SETS, ToolSetName, build_tools
+from agentspace.tools import TOOL_SETS, ToolSetName, allows_mcp, build_tools
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])  # TS: a sub-router, like `new Hono().basePath("/sessions")`
 
@@ -212,6 +214,8 @@ async def send_message(
     settings: SettingsDep,
     runs: RunsDep,
     catalog: CatalogDep,
+    mcp: McpDep,
+    mcp_servers: McpServerConfigsDep,
 ) -> AsyncIterable[AgentEvent]:
     """Start a run on a new user message and stream its events as SSE.
 
@@ -222,7 +226,7 @@ async def send_message(
     # Untitled sessions take their title from the first prompt.
     if run.session.title is None:
         await store.set_title(run.session, prompt.text()[:80] or "Image")
-    async for event in stream_run(run, prompt, settings, runs, model_lookup(run, catalog)):
+    async for event in stream_run(run, prompt, settings, runs, model_lookup(run, catalog), mcp, mcp_servers):
         yield event
 
 
@@ -239,14 +243,19 @@ def continuable(run: RunDep) -> Run:
 
 @router.post("/{session_id}/continue", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
 async def continue_run(
-    run: Annotated[Run, Depends(continuable)], settings: SettingsDep, runs: RunsDep, catalog: CatalogDep
+    run: Annotated[Run, Depends(continuable)],
+    settings: SettingsDep,
+    runs: RunsDep,
+    catalog: CatalogDep,
+    mcp: McpDep,
+    mcp_servers: McpServerConfigsDep,
 ) -> AsyncIterable[AgentEvent]:
     """Start a run on the transcript as it is, with no new message: a retry after an error, a stop or a crash.
 
     Streams like `POST .../messages`. 409 if a run is going, 422 if the transcript
     is empty or ends with the agent's reply (pi's `agentLoopContinue`).
     """
-    async for event in stream_run(run, None, settings, runs, model_lookup(run, catalog)):
+    async for event in stream_run(run, None, settings, runs, model_lookup(run, catalog), mcp, mcp_servers):
         yield event
 
 
@@ -309,23 +318,32 @@ def model_lookup(run: Run, catalog: OpenRouterCatalog) -> ModelLookup:
 
 
 async def stream_run(
-    run: Run, prompt: UserMessage | None, settings: Settings, runs: RunManager, lookup_model: ModelLookup
+    run: Run,
+    prompt: UserMessage | None,
+    settings: Settings,
+    runs: RunManager,
+    lookup_model: ModelLookup,
+    mcp: McpManager,
+    mcp_servers: list[ServerConfig],
 ) -> AsyncIterator[AgentEvent]:
     """Start the claimed run in the background, on a prompt or continuing, and yield its events to this client.
+
+    The tools are the session's built-in ones plus those of the enabled MCP servers that connect in time (ADR-017).
 
     After the loop, the run compacts if the context neared the window, or compacts and
     retries once if the provider refused it as too long (ADR-009).
     """
     session = run.session
     run.workspace.mkdir(parents=True, exist_ok=True)
-    tools = build_tools(session.tools, bash=settings.enable_bash)
+    tools: list[Tool] = build_tools(session.tools, bash=settings.enable_bash)
     # Rescanned every run, so an added or edited skill shows without a restart (ADR-016).
     skills, _ = await asyncify(load_skills)(settings.resolved_skills_dir)
-    system_prompt = build_system_prompt(session.system_prompt, tools, skills)
 
     async def agent(emit: Emit, prompt: UserMessage | None) -> None:
         """One pass of the agent loop over what the model reads of the transcript so far."""
         info = await lookup_model()
+        # Built here, not once above, so it lists the MCP tools that joined at the start of the run.
+        system_prompt = build_system_prompt(session.system_prompt, tools, skills)
         # Only when the catalog says so: an unknown model gets the images, and a refusal is a normal error.
         blind = info is not None and not info.image_input
 
@@ -380,7 +398,11 @@ async def stream_run(
 
     # TS: an inner function closing over this request's values; the manager calls it with its own `emit`.
     async def loop(emit: Emit) -> None:
-        """This run: the agent loop, then compaction if the context needs it."""
+        """This run: MCP tools, the agent loop, then compaction if the context needs it."""
+        # Inside the run, so the stream is already open while slow servers are waited for.
+        # Never for a read-only session: an MCP tool can do anything its server does, writes included.
+        if mcp_servers and allows_mcp(session.tools):
+            tools.extend(await mcp.tools_for(session.id, run.workspace, mcp_servers))
         await agent(emit, prompt)
         if not settings.compaction_enabled:
             return
