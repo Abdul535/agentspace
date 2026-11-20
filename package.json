@@ -2,8 +2,9 @@
   "name": "agentspace",
   "private": true,
   "scripts": {
-    "dev:api": "cd apps/api && uv run fastapi dev",
-    "dev:web": "pnpm --filter web dev",
+    "dev:api": "[ -f .worktree.env ] && . ./.worktree.env; cd apps/api && uv run fastapi dev --port ${API_PORT:-8000}",
+    "dev:web": "[ -f .worktree.env ] && . ./.worktree.env; pnpm --filter web dev",
+    "setup:worktree": "bash scripts/worktree-setup.sh",
     "build:web": "pnpm --filter web build",
     "lint:web": "pnpm --filter web lint",
     "gen:api": "uv run --project apps/api python apps/api/scripts/export_openapi.py > apps/web/openapi.json && pnpm --filter web gen:api",

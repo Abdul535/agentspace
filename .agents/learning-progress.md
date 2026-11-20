@@ -4,7 +4,7 @@ How the project owner is learning the codebase, one row per activity. The rules
 are in `AGENTS.md`: predict before each step, explain it back after, a quiz before
 each commit, and a debugging session offered after every second commit.
 
-**Commits since the last debugging offer:** 0 (offered 2026-11-20 with the CI commit)
+**PRs merged since the last debugging offer:** 0 (offered 2026-11-20 with the CI commit)
 
 ## Log
 
@@ -37,8 +37,12 @@ each commit, and a debugging session offered after every second commit.
 | 2026-11-19 | After 2 commits | Debugging offer | Not taken up (moved on to step 16) | |
 | 2026-11-20 | ADR-003 step 16: app messages + `convert_to_llm` (ADR-008) | Explain-back | Skipped (went straight to "commit it") | |
 | 2026-11-20 | ADR-003 step 16: app messages + `convert_to_llm` (ADR-008) | Quiz | 2/3 | Q3: a converter that raises is not caught; the exception ends the run before `provider.stream` (`loop.py:208`), nothing is sent. No fallback |
+| 2026-11-20 | ADR-003 step 17: compaction | Prediction | Both right: the LLM writes the summary from a prompt; old messages stay in the DB | Not covered: when it triggers (threshold `window - reserve`, or a context-overflow error), which messages are kept (recent ~20k tokens, never cut between a tool call and its result), how the model sees summary + kept tail while the DB keeps everything (a marker pointing at the first kept message), updating an earlier summary instead of re-summarizing |
 | 2026-11-20 | CI (ADR-010): GitHub Actions + `ty` | Prediction | Skipped ("go for 1"); asked which Python type checkers the industry uses | How the API-types check runs: export the spec with Python, generate the TS with Node, then `git diff --exit-code` fails on any change |
 | 2026-11-20 | CI (ADR-010): GitHub Actions, `ty`, pre-commit hook | Explain-back | Skipped (went straight to "let's commit it") | |
 | 2026-11-20 | CI (ADR-010): GitHub Actions, `ty`, pre-commit hook | Quiz | 0/4 | Q1: `ended()` drops notices via `convert_to_llm` (`test_loop.py:72`). Q2: `AsyncGenerator` because `aclosing()` needs `aclose()` (`find.py:63`), flagged by `ty` not ruff. Q3: `git diff --exit-code` compares working tree to the index, so unstaged regenerated API types fail the hook (`package.json:13`). Q4: `assert` narrows the type *and* raises at runtime; TS `!` is erased |
 | 2026-11-20 | After 2 commits | Debugging offer | Offered with the CI commit | |
 | 2026-11-20 | CI fix: fresh-machine failures (catalog cache test, `next typegen`) | Quiz | 0/3 | Q1: `time.monotonic()` counts from boot, so `_fetched_at = 0` is still "fresh" on a just-booted CI machine (`catalog.py:41`). Q2: `PageProps`/`LayoutProps` come from `next typegen`; without it `tsc` fails on a fresh clone. Q3: `monotonic()` ≈ `performance.now()`, not `Date.now()` |
+| 2026-11-20 | Worktree workflow (planned ADR-011) | Prediction | Half right: saw the git merge conflict in `config.py` | Missed: two Alembic migrations with the same `down_revision` merge with no git conflict but give two heads, so `alembic upgrade head` fails; fix by pointing the later one's `down_revision` at the earlier one. Generated files (`schema.d.ts`, `uv.lock`, `pnpm-lock.yaml`) conflict too; regenerate them, don't hand-merge |
+| 2026-11-20 | Worktree workflow (ADR-011) | Explain-back | Skipped (went straight to "let's commit it") | |
+| 2026-11-20 | Worktree workflow (ADR-011) | Quiz | 2/4 | Q3: `;` vs `&&` in `dev:api` — without `.worktree.env` the `[ -f ]` test fails and `&&` would stop the server starting; `export` (not `;`) passes vars to children (`package.json:5`). Q4 (repeat miss from CI): `git diff` compares to the staged copy, so a staged regenerated `schema.d.ts` passes `check:api-types` (`package.json:14`) |
