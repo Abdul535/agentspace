@@ -7,6 +7,14 @@
 @source "../../node_modules/streamdown/dist/*.js";
 @source "../../node_modules/@streamdown/code/dist/*.js";
 
+/* Streamdown's word fade has no reduced-motion fallback; show text at once for readers who asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  [data-sd-animate],
+  [data-sd-animate-marker]::marker {
+    animation: none;
+  }
+}
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

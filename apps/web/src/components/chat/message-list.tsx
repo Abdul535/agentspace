@@ -2,7 +2,7 @@
 
 import { code } from "@streamdown/code";
 import { AlertCircle, Brain, ChevronRight } from "lucide-react";
-import { Streamdown } from "streamdown";
+import { type AnimateOptions, Streamdown } from "streamdown";
 
 import { ToolCallView } from "@/components/chat/tool-call";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -11,6 +11,9 @@ import type { AssistantMessage, CompactionSummaryMessage, Message, ToolResultMes
 
 // Shiki highlighting for fenced code; defined once so Streamdown's memo isn't broken by a new object each render.
 const plugins = { code };
+
+// Blur-fade each streamed word in instead of letting chunks pop; staggered so a big chunk ripples in rather than flashing at once.
+const streamAnimation: AnimateOptions = { animation: "blurIn", sep: "word", duration: 300, stagger: 20, easing: "ease-out" };
 
 /** The transcript: user prompts, assistant replies with their thinking and tool calls inline, and notices as dividers. Tool results render inside their call. */
 export function MessageList({
@@ -65,7 +68,7 @@ export function MessageList({
       })}
       {draftThinking && <Thinking text={draftThinking} streaming={!draft} />}
       {draft !== null && (
-        <Streamdown plugins={plugins} caret="block" isAnimating>
+        <Streamdown plugins={plugins} isAnimating animated={streamAnimation}>
           {draft}
         </Streamdown>
       )}
