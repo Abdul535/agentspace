@@ -81,7 +81,7 @@ def portal(client: TestClient) -> BlockingPortal:
 def user_texts(messages: list[AgentMessage]) -> list[str]:
     """The text of each message, all of which must be user messages."""
     assert all(isinstance(m, UserMessage) for m in messages)
-    return [m.content for m in messages if isinstance(m, UserMessage)]
+    return [m.text() for m in messages if isinstance(m, UserMessage)]
 
 
 def wait_for(condition: Callable[[], bool]) -> None:

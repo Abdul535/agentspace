@@ -1,4 +1,4 @@
-"""The `read` tool. Same limits and paging as pi's `packages/coding-agent/src/core/tools/read.ts`, text files only."""
+"""The `read` tool: text pages with the limits of pi's `tools/read.ts`, and images (ADR-015)."""
 
 from pathlib import Path
 from typing import Annotated, Any
@@ -7,6 +7,8 @@ from asyncer import asyncify
 from pydantic import BaseModel, Field
 
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
+from agentspace.ai.images import ImageError, process_image, sniff_image
+from agentspace.ai.messages import TextContent
 from agentspace.tools.paths import resolve_in_workspace
 
 # Output caps per call, so one read can't flood the model's context; whichever is hit first wins.
@@ -27,11 +29,12 @@ class ReadParams(BaseModel):
 
 # TS: class ReadTool extends Tool<ReadParams>
 class ReadTool(Tool[ReadParams]):
-    """Returns a page of a text file in the workspace."""
+    """Returns a page of a text file in the workspace, or an image file as an image."""
 
     name = "read"
     description = (
-        f"Read the contents of a text file. Output is truncated to {MAX_LINES} lines or "
+        "Read the contents of a file. Supports text files and images (png, jpeg, gif, webp); images are "
+        f"sent as attachments. Text output is truncated to {MAX_LINES} lines or "
         f"{MAX_BYTES // 1024}KB, whichever is hit first. Use offset/limit for large files. "
         "When you need the full file, continue with offset until complete."
     )
@@ -43,22 +46,52 @@ class ReadTool(Tool[ReadParams]):
         """Read the file off the event loop."""
         path = resolve_in_workspace(ctx.workspace, args.path)
         # TS: the file I/O below blocks (like fs.readFileSync); asyncify runs it on a worker thread and awaits it.
-        return await asyncify(read_text_page)(path, args.path, args.offset, args.limit)
+        return await asyncify(read_file)(path, args.path, args.offset, args.limit)
 
 
-def read_text_page(path: Path, shown_path: str, offset: int | None, limit: int | None) -> ToolResult:
-    """The requested lines, cut at the caps, with a note saying where to continue.
-
-    `details` holds the shown line range, the file's line count and whether more is left.
-    """
+def read_file(path: Path, shown_path: str, offset: int | None, limit: int | None) -> ToolResult:
+    """An image file as an image, any other file as a page of text."""
     # TS: f"...{x}..." strings are template literals: `...${x}...`.
     if not path.exists():
         raise ToolError(f"File not found: {shown_path}")
     if path.is_dir():
         raise ToolError(f"{shown_path} is a directory, not a file.")
     data = path.read_bytes()  # TS: a Buffer; .decode() below is buffer.toString("utf8")
+    # Judged by the bytes, not the name: a `.png` that isn't one is read as text, or refused as binary.
+    if sniff_image(data):
+        return read_image(data, shown_path)
+    return read_text_page(data, shown_path, offset, limit)
+
+
+def read_image(data: bytes, shown_path: str) -> ToolResult:
+    """The image, shrunk to send, after a note naming its type and how much it was shrunk."""
+    try:
+        processed = process_image(data)
+    except ImageError as exc:
+        raise ToolError(f"{shown_path}: {exc}") from exc
+    note = f"Read image file [{processed.image.mime_type}]"
+    if extra := processed.note():
+        note += f"\n{extra}"
+    details = {
+        "path": shown_path,
+        "image": {
+            "mime_type": processed.image.mime_type,
+            "width": processed.width,
+            "height": processed.height,
+            "original_width": processed.original_width,
+            "original_height": processed.original_height,
+        },
+    }
+    return ToolResult(content=[TextContent(text=note), processed.image], details=details)
+
+
+def read_text_page(data: bytes, shown_path: str, offset: int | None, limit: int | None) -> ToolResult:
+    """The requested lines, cut at the caps, with a note saying where to continue.
+
+    `details` holds the shown line range, the file's line count and whether more is left.
+    """
     if b"\0" in data[:BINARY_SNIFF_BYTES]:
-        raise ToolError(f"{shown_path} looks like a binary file; only text files can be read.")
+        raise ToolError(f"{shown_path} looks like a binary file; only text and image files can be read.")
     lines = data.decode("utf-8", errors="replace").splitlines()
     if not lines:
         return ToolResult.text("(empty file)", page_details(shown_path, 0, 0, 0, truncated=False))

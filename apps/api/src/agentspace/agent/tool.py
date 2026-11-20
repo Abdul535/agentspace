@@ -8,7 +8,7 @@ from typing import Any, ClassVar, Literal, Self
 
 from pydantic import BaseModel
 
-from agentspace.ai.messages import TextContent
+from agentspace.ai.messages import TextContent, UserContent
 from agentspace.ai.provider import ToolSpec
 
 # How the calls in one reply run: one after another, or concurrently (after pi's `ToolExecutionMode`).
@@ -41,7 +41,8 @@ class ToolError(Exception):
 class ToolResult(BaseModel):
     """What a tool returns, after pi's `AgentToolResult`: content for the model, details for the UI."""
 
-    content: list[TextContent]
+    content: list[UserContent]
+    """Text and images for the model (ADR-015)."""
     details: dict[str, Any] | None = None
     """Structured facts for the UI and logs (paths, line ranges, sizes); never sent to the model."""
     is_error: bool = False

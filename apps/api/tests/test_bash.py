@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from agentspace.agent.tool import ToolContext, ToolResult
+from agentspace.ai.messages import joined_text
 from agentspace.tools import TOOL_SETS, build_tools
 from agentspace.tools.bash import BashParams, BashTool, read_tail
 from agentspace.tools.read import MAX_BYTES, MAX_LINES
@@ -25,7 +26,7 @@ async def bash(ctx: ToolContext, command: str, timeout: float | None = None) -> 
 
 
 def text(result: ToolResult) -> str:
-    return result.content[0].text
+    return joined_text(result.content)
 
 
 async def test_runs_in_the_workspace_with_stdout_and_stderr(ctx: ToolContext) -> None:

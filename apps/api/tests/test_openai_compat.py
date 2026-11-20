@@ -3,7 +3,7 @@ import json
 import httpx
 import pytest
 
-from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage
+from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage, joined_text
 from agentspace.ai.provider import (
     INTERRUPTED_TOOL_RESULT,
     Context,
@@ -159,4 +159,4 @@ def test_prepare_transcript_repairs_interrupted_runs() -> None:
     stand_in = repaired[2]
     assert isinstance(stand_in, ToolResultMessage)
     assert stand_in.tool_call_id == "c1" and stand_in.is_error
-    assert stand_in.content[0].text == INTERRUPTED_TOOL_RESULT
+    assert joined_text(stand_in.content) == INTERRUPTED_TOOL_RESULT

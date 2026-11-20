@@ -35,6 +35,7 @@ from agentspace.ai.messages import (
     ToolCall,
     ToolResultMessage,
     UserMessage,
+    joined_text,
 )
 from agentspace.ai.provider import AssistantEvent, Context, TextDeltaEvent, prepare_transcript
 from agentspace.ai.providers.fake import FakeProvider, Reply, text_reply, tool_reply
@@ -96,7 +97,7 @@ async def test_write_then_read_then_answer(tmp_path: Path) -> None:
     messages = ended(events)
     assert [m.role for m in messages] == ["user", "assistant", "tool_result", "assistant", "tool_result", "assistant"]
     read_result = messages[4]
-    assert isinstance(read_result, ToolResultMessage) and read_result.content[0].text == "hi there"
+    assert isinstance(read_result, ToolResultMessage) and joined_text(read_result.content) == "hi there"
     assert read_result.details is not None and read_result.details["path"] == "hello.txt"
     assert end_of(events).reason == "done"
     assert end_of(events).new_messages == messages
@@ -122,7 +123,7 @@ async def test_tool_failures_become_error_results_and_the_loop_continues(tmp_pat
 
     results = [m for m in ended(events) if isinstance(m, ToolResultMessage)]
     assert all(r.is_error for r in results)
-    texts = [r.content[0].text for r in results]
+    texts = [joined_text(r.content) for r in results]
     assert texts[0] == "Tool nope not found."
     assert texts[1].startswith("Invalid arguments for read:") and "path" in texts[1]
     assert texts[2] == "File not found: missing.txt"
@@ -137,7 +138,7 @@ async def test_tool_calls_cut_off_by_length_are_not_executed(tmp_path: Path) -> 
 
     assert not (tmp_path / "x.txt").exists()
     result = next(m for m in ended(events) if isinstance(m, ToolResultMessage))
-    assert result.is_error and "output token limit" in result.content[0].text
+    assert result.is_error and "output token limit" in joined_text(result.content)
     assert end_of(events).reason == "done"
 
 
@@ -186,7 +187,7 @@ async def test_returned_error_results_keep_their_details(tmp_path: Path) -> None
     events = await run(FakeProvider(replies), tmp_path, tools=[SoftFailTool()])
 
     result = next(m for m in ended(events) if isinstance(m, ToolResultMessage))
-    assert result.is_error and result.content[0].text == "nope" and result.details == {"code": 7}
+    assert result.is_error and joined_text(result.content) == "nope" and result.details == {"code": 7}
 
 
 class EchoParams(BaseModel):
@@ -227,7 +228,7 @@ async def test_before_tool_call_can_block_with_or_without_a_reason(tmp_path: Pat
     echo, results = await run_echo(tmp_path, LoopConfig(before_tool_call=before), *calls)
 
     assert echo.ran == ["c"]
-    assert [(r.is_error, r.content[0].text) for r in results] == [
+    assert [(r.is_error, joined_text(r.content)) for r in results] == [
         (True, "Not allowed here."),
         (True, "Tool execution was blocked."),
         (False, "c"),
@@ -258,7 +259,7 @@ async def test_a_failing_before_tool_call_blocks_the_call(tmp_path: Path) -> Non
     echo, results = await run_echo(tmp_path, LoopConfig(before_tool_call=before), call("echo", text="a"))
 
     assert echo.ran == []
-    assert results[0].is_error and "policy store offline" in results[0].content[0].text
+    assert results[0].is_error and "policy store offline" in joined_text(results[0].content)
 
 
 async def test_after_tool_call_replaces_only_the_fields_it_sets(tmp_path: Path) -> None:
@@ -291,8 +292,8 @@ async def test_a_failing_after_tool_call_replaces_the_result_with_an_error(tmp_p
     echo, results = await run_echo(tmp_path, LoopConfig(after_tool_call=after), call("echo", text="secret"))
 
     assert echo.ran == ["secret"]  # the tool did run
-    assert results[0].is_error and "filter crashed" in results[0].content[0].text
-    assert "secret" not in results[0].content[0].text
+    assert results[0].is_error and "filter crashed" in joined_text(results[0].content)
+    assert "secret" not in joined_text(results[0].content)
 
 
 async def test_after_tool_call_is_skipped_for_blocked_calls(tmp_path: Path) -> None:
@@ -349,7 +350,7 @@ async def test_prepare_arguments_fixes_args_without_changing_the_transcript(tmp_
     results = [m for m in ended(events) if isinstance(m, ToolResultMessage)]
     assert echo.ran == ["hi"]
     assert not results[0].is_error
-    assert results[1].is_error and "cannot prepare" in results[1].content[0].text
+    assert results[1].is_error and "cannot prepare" in joined_text(results[1].content)
     # The stored call still holds what the model sent.
     assert reply.tool_calls()[0].arguments == {"message": "hi"}
 
@@ -360,7 +361,7 @@ async def test_edit_with_camel_case_keys_runs_end_to_end(tmp_path: Path) -> None
     events = await run(FakeProvider([reply, text_reply("ok")]), tmp_path)
 
     result = next(m for m in ended(events) if isinstance(m, ToolResultMessage))
-    assert not result.is_error, result.content[0].text
+    assert not result.is_error, joined_text(result.content)
     assert (tmp_path / "f.txt").read_text() == "bye\n"
 
 
@@ -624,7 +625,7 @@ async def test_tool_updates_are_emitted_before_the_calls_end(tmp_path: Path) -> 
     events = await run(FakeProvider([reply, text_reply("ok")]), tmp_path, tools=[progress])
 
     updates = [e for e in events if isinstance(e, ToolExecutionUpdateEvent)]
-    assert sorted((u.tool_call_id, u.partial.content[0].text) for u in updates) == [
+    assert sorted((u.tool_call_id, joined_text(u.partial.content)) for u in updates) == [
         ("c1", "a 1"),
         ("c1", "a 2"),
         ("c2", "b 1"),
@@ -637,7 +638,7 @@ async def test_tool_updates_are_emitted_before_the_calls_end(tmp_path: Path) -> 
         assert mine == ["tool_execution_start", "tool_execution_update", "tool_execution_update", "tool_execution_end"]
     # Updates are live only: the saved result is the final one.
     results = [m for m in ended(events) if isinstance(m, ToolResultMessage)]
-    assert [r.content[0].text for r in results] == ["a done", "b done"]
+    assert [joined_text(r.content) for r in results] == ["a done", "b done"]
 
 
 async def test_updates_after_the_call_finished_are_ignored(tmp_path: Path) -> None:
@@ -650,7 +651,7 @@ async def test_updates_after_the_call_finished_are_ignored(tmp_path: Path) -> No
     await progress.kept[0](ToolResult.text("too late"))  # no error, and nothing is emitted
 
     assert len(events) == before
-    assert not any(isinstance(e, ToolExecutionUpdateEvent) and "late" in e.partial.content[0].text for e in events)
+    assert not any(isinstance(e, ToolExecutionUpdateEvent) and "late" in joined_text(e.partial.content) for e in events)
 
 
 class StopTool(EchoTool):
@@ -671,7 +672,7 @@ async def test_a_batch_where_every_call_terminates_ends_the_run(tmp_path: Path) 
     assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "terminated"
     # Both results are still saved, and the flag isn't part of the message.
     results = [m for m in ended(events) if isinstance(m, ToolResultMessage)]
-    assert [r.content[0].text for r in results] == ["a", "b"]
+    assert [joined_text(r.content) for r in results] == ["a", "b"]
     assert "terminate" not in results[0].model_dump()
 
 
@@ -729,7 +730,7 @@ async def test_finish_turn_sees_each_turn_and_can_end_the_run(tmp_path: Path) ->
     assert isinstance(events[-1], AgentEndEvent) and events[-1].reason == "finish_turn"
     # The hook sees the turn after its tool results were added, and before turn_end.
     first = seen[0]
-    assert first.turn == 1 and [r.content[0].text for r in first.tool_results] == ["a"]
+    assert first.turn == 1 and [joined_text(r.content) for r in first.tool_results] == ["a"]
     assert [m.role for m in first.new_messages] == ["user", "assistant", "tool_result"]
     assert isinstance(events[-2], TurnEndEvent) and events[-2].turn == 2
 

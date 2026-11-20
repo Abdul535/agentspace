@@ -23,6 +23,8 @@ class ModelInfo(BaseModel):
     """US dollars per million output tokens; None when the price varies."""
     reasoning: bool = False
     """Whether the model takes a thinking level (OpenRouter's `reasoning` parameter, ADR-012)."""
+    image_input: bool = False
+    """Whether the model can see images (`"image"` in OpenRouter's `architecture.input_modalities`, ADR-015)."""
 
 
 class CatalogError(Exception):
@@ -75,6 +77,7 @@ def to_model_info(raw: dict) -> ModelInfo:
         input_price=per_million(pricing.get("prompt")),
         output_price=per_million(pricing.get("completion")),
         reasoning="reasoning" in (raw.get("supported_parameters") or []),
+        image_input="image" in ((raw.get("architecture") or {}).get("input_modalities") or []),
     )
 
 

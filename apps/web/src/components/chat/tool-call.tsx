@@ -13,8 +13,10 @@ import {
   Wrench,
 } from "lucide-react";
 
+import { ImageThumbnails } from "@/components/chat/image-thumbnails";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import type { ToolCall, ToolResultMessage } from "@/lib/api/client";
+import { imageSrc, imagesOf, textOf } from "@/lib/api/content";
 import { cn } from "@/lib/utils";
 
 const icons: Record<string, typeof Wrench> = {
@@ -46,7 +48,8 @@ export function ToolCallView({
   liveOutput?: string;
 }) {
   const path = typeof call.arguments.path === "string" ? call.arguments.path : null;
-  const output = result?.content.map((block) => block.text).join("") ?? "";
+  const output = result ? textOf(result.content) : "";
+  const images = result ? imagesOf(result.content).map(imageSrc) : [];
   const failed = result?.is_error ?? false;
 
   return (
@@ -81,6 +84,7 @@ export function ToolCallView({
         >
           {output || "(no output)"}
         </pre>
+        <ImageThumbnails srcs={images} className="border-t px-3 py-2" />
       </CollapsibleContent>
     </Collapsible>
   );

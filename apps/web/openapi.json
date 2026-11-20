@@ -189,7 +189,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PromptCreate"
+                "$ref": "#/components/schemas/MessageCreate"
               }
             }
           }
@@ -926,6 +926,67 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "ImageContent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "image",
+            "title": "Type",
+            "default": "image"
+          },
+          "data": {
+            "type": "string",
+            "title": "Data"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data",
+          "mime_type"
+        ],
+        "title": "ImageContent",
+        "description": "An image in a user message or tool result, inline as base64 (ADR-015)."
+      },
+      "ImageInput": {
+        "properties": {
+          "data": {
+            "type": "string",
+            "maxLength": 13981080,
+            "title": "Data"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "title": "ImageInput",
+        "description": "An image attached to a prompt, as base64; its type is read from the bytes, not trusted from the client."
+      },
+      "MessageCreate": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "default": ""
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ImageInput"
+            },
+            "type": "array",
+            "maxItems": 5,
+            "title": "Images",
+            "default": []
+          }
+        },
+        "type": "object",
+        "title": "MessageCreate",
+        "description": "A new user message to run the agent on: text, images (ADR-015), or both."
+      },
       "MessageEndEvent": {
         "properties": {
           "type": {
@@ -1083,6 +1144,11 @@
             "type": "boolean",
             "title": "Reasoning",
             "default": false
+          },
+          "image_input": {
+            "type": "boolean",
+            "title": "Image Input",
+            "default": false
           }
         },
         "type": "object",
@@ -1134,7 +1200,7 @@
           "content"
         ],
         "title": "PromptCreate",
-        "description": "A new user message to run the agent on."
+        "description": "A text message for a run: steering or a follow-up."
       },
       "RunSnapshot": {
         "properties": {
@@ -1690,7 +1756,7 @@
         "properties": {
           "content": {
             "items": {
-              "$ref": "#/components/schemas/TextContent"
+              "$ref": "#/components/schemas/UserContent"
             },
             "type": "array",
             "title": "Content"
@@ -1743,7 +1809,7 @@
           },
           "content": {
             "items": {
-              "$ref": "#/components/schemas/TextContent"
+              "$ref": "#/components/schemas/UserContent"
             },
             "type": "array",
             "title": "Content"
@@ -1866,6 +1932,23 @@
         "title": "Usage",
         "description": "Token counts the provider reported for one model reply."
       },
+      "UserContent": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TextContent"
+          },
+          {
+            "$ref": "#/components/schemas/ImageContent"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "image": "#/components/schemas/ImageContent",
+            "text": "#/components/schemas/TextContent"
+          }
+        }
+      },
       "UserMessage": {
         "properties": {
           "role": {
@@ -1875,7 +1958,17 @@
             "default": "user"
           },
           "content": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "$ref": "#/components/schemas/UserContent"
+                },
+                "type": "array"
+              }
+            ],
             "title": "Content"
           },
           "timestamp": {

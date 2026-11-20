@@ -12,6 +12,7 @@ import httpx
 
 from agentspace.ai.messages import (
     AssistantMessage,
+    ImageContent,
     Message,
     StopReason,
     TextContent,
@@ -19,7 +20,10 @@ from agentspace.ai.messages import (
     ToolCall,
     ToolResultMessage,
     Usage,
+    UserContent,
     UserMessage,
+    images_of,
+    joined_text,
 )
 from agentspace.ai.provider import (
     AssistantEvent,
@@ -309,7 +313,7 @@ def to_wire_messages(system_prompt: str, messages: list[Message], *, provider: s
         # TS: `match` with `case Cls():` is a switch on `message instanceof Cls`.
         match message:
             case UserMessage():
-                wire.append({"role": "user", "content": message.content})
+                wire.append({"role": "user", "content": wire_user_content(message.content)})
             case AssistantMessage():
                 entry: dict[str, Any] = {"role": "assistant", "content": message.text() or None}
                 entry.update(replay_thinking(message, provider=provider, model=model))
@@ -325,11 +329,29 @@ def to_wire_messages(system_prompt: str, messages: list[Message], *, provider: s
                     ]
                 wire.append(entry)
             case ToolResultMessage():
-                wire.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": message.tool_call_id,
-                        "content": "".join(block.text for block in message.content),
-                    }
-                )
+                text = joined_text(message.content)
+                images = images_of(message.content)
+                if not text:
+                    text = "(see attached image)" if images else ""
+                wire.append({"role": "tool", "tool_call_id": message.tool_call_id, "content": text})
+                # Chat Completions takes images only from users, so a tool's images follow in a user message
+                # that exists only on the wire (pi's `openai-completions.ts` does the same).
+                if images:
+                    parts: list[dict[str, Any]] = [{"type": "text", "text": "Attached image(s) from tool result:"}]
+                    parts += [image_part(image) for image in images]
+                    wire.append({"role": "user", "content": parts})
     return wire
+
+
+def wire_user_content(content: str | list[UserContent]) -> str | list[dict[str, Any]]:
+    """A user message's content: a plain string, or text and `image_url` parts when it holds images."""
+    if not images_of(content):
+        return joined_text(content)
+    assert isinstance(content, list)  # images_of() found blocks, so it's the list form
+    # TS: a ternary inside .map(): text blocks become text parts, images become image_url parts.
+    return [{"type": "text", "text": b.text} if isinstance(b, TextContent) else image_part(b) for b in content]
+
+
+def image_part(image: ImageContent) -> dict[str, Any]:
+    """An image as a Chat Completions `image_url` part with a `data:` URL."""
+    return {"type": "image_url", "image_url": {"url": f"data:{image.mime_type};base64,{image.data}"}}

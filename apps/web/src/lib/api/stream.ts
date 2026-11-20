@@ -1,10 +1,13 @@
 import { type AgentEvent, errorMessage, type RunSnapshot } from "./client";
+import type { components } from "./schema";
+
+type MessageCreate = components["schemas"]["MessageCreate"];
 
 /** What the run streams carry: agent events, plus a snapshot first when attaching. */
 export type RunStreamEvent = AgentEvent | RunSnapshot;
 
 /**
- * Send a prompt and yield the run's events as they stream in.
+ * Send a prompt (text, images or both) and yield the run's events as they stream in.
  *
  * The server owns the run (ADR-007): aborting `signal` only stops listening.
  * Stop the run itself with `POST /sessions/{id}/abort`.
@@ -12,13 +15,16 @@ export type RunStreamEvent = AgentEvent | RunSnapshot;
 export async function* streamPrompt(
   sessionId: string,
   content: string,
+  images: string[],
   signal: AbortSignal,
 ): AsyncGenerator<RunStreamEvent> {
+  // Images go as base64 data URLs; the server reads their type from the bytes and shrinks them (ADR-015).
+  const body: MessageCreate = { content, images: images.map((data) => ({ data })) };
   yield* readEvents(
     await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "text/event-stream" },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify(body),
       signal,
     }),
   );

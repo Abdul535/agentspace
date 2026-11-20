@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { api, errorMessage, type Message } from "./client";
+import { textOf } from "./content";
 import { queryKeys } from "./queries";
 import { type RunStreamEvent, streamCompact, streamContinue, streamPrompt, watchRun } from "./stream";
 
@@ -75,7 +76,7 @@ function reduce(s: RunState, event: RunStreamEvent): RunState {
     case "tool_execution_start":
       return { ...s, pendingTools: new Set(s.pendingTools).add(event.tool_call_id) };
     case "tool_execution_update": {
-      const text = event.partial.content.map((block) => block.text).join("");
+      const text = textOf(event.partial.content);
       return { ...s, toolOutput: new Map(s.toolOutput).set(event.tool_call_id, text) };
     }
     case "tool_execution_end": {
@@ -167,8 +168,9 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
   // Leaving the page stops listening, never the run.
   useEffect(() => () => controller.current?.abort(), []);
 
-  function send(content: string) {
-    void listen((signal) => streamPrompt(sessionId, content, signal));
+  // `images` are data URLs from the composer (ADR-015).
+  function send(content: string, images: string[] = []) {
+    void listen((signal) => streamPrompt(sessionId, content, images, signal));
   }
 
   // Have the agent answer the transcript as it stands, e.g. after an error, a stop or a server restart.

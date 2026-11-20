@@ -230,11 +230,18 @@ The extension points keep pi's names in snake_case (`before_tool_call`,
 19. [ ] **`prepare_request`.** Swap the model, thinking level or context right
     before each provider call, for example a cheaper model for simple turns.
     *pi:* `PrepareRequest`.
+    Skipped (2026-11-20): not needed now. The design is in ADR-013 (rejected),
+    ready if a later step such as virtual models needs it.
 20. [ ] **More providers + `get_api_key`.** An Anthropic Messages adapter and
     per-call key lookup. *pi:* `packages/ai/src/providers/`.
-21. [ ] **Images.** Image content in user messages, `read` returning images, and a
+    Skipped (2026-11-20): not needed now; OpenRouter stays the only provider.
+21. [x] **Images.** Image content in user messages, `read` returning images, and a
     switch to block images for models that cannot take them.
     *pi:* `read.ts`, `blockImages` in `core/sdk.ts`.
+    Built per ADR-015: `ImageContent` stored inline as base64 after a Pillow
+    resize (2000×2000, 4.5 MB), `images` on `POST .../messages`, `read` returns
+    images, `strip_images` for models the catalog says are blind, and paste,
+    drop and attach in the composer.
 
 ### Phase 5 — Extending the agent
 22. [ ] **Changing tools mid-session.** Announce tools added or removed to the
