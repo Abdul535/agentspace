@@ -8,6 +8,8 @@ export const queryKeys = {
   sessions: ["sessions"] as const,
   session: (id: string) => ["sessions", id] as const,
   models: ["models"] as const,
+  skills: ["skills"] as const,
+  skill: (name: string) => ["skills", name] as const,
 };
 
 export function useSessions() {
@@ -82,5 +84,46 @@ export function useUpdateSession(id: string) {
         queryClient.invalidateQueries({ queryKey: queryKeys.sessions, exact: true }),
       ]);
     },
+  });
+}
+
+// Skills on the shared shelf; the API rescans on every request, so refetch on each mount and window focus.
+export function useSkills() {
+  return useQuery({
+    queryKey: queryKeys.skills,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/skills");
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
+    staleTime: 0,
+  });
+}
+
+// One skill's instructions, read fresh from its SKILL.md.
+export function useSkill(name: string) {
+  return useQuery({
+    queryKey: queryKeys.skill(name),
+    queryFn: async () => {
+      const { data, error } = await api.GET("/skills/{name}", { params: { path: { name } } });
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+// A text file inside a skill's folder, e.g. one of its references.
+export function useSkillFile(name: string, path: string) {
+  return useQuery({
+    queryKey: [...queryKeys.skill(name), "files", path] as const,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/skills/{name}/files/{path}", { params: { path: { name, path } } });
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
+    staleTime: 0,
+    retry: false,
   });
 }

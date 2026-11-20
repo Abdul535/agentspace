@@ -28,6 +28,9 @@ class ToolContext:
 
     workspace: Path
     """The folder the session's tools act in. File tools refuse paths outside it."""
+    read_roots: tuple[Path, ...] = ()
+    """Folders outside the workspace that `read`, `ls`, `grep` and `find` may open but nothing may change:
+    the loaded skills' folders (ADR-016)."""
     on_update: OnUpdate | None = None
     """Set by the loop for each call. Send a snapshot of the output so far (not a delta); the UI shows the latest.
     Calls after `execute` returns are ignored. Updates are never sent to the model or saved."""

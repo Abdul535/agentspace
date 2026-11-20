@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
 from agentspace.tools.output import head_within_cap, with_notices
-from agentspace.tools.paths import resolve_in_workspace
+from agentspace.tools.paths import resolve_readable
 from agentspace.tools.read import MAX_BYTES
 
 DEFAULT_LIMIT = 500
@@ -41,7 +41,7 @@ class LsTool(Tool[LsParams]):
     async def execute(self, args: LsParams, ctx: ToolContext) -> ToolResult:
         """Read the directory off the event loop."""
         shown_path = args.path or "."
-        target = resolve_in_workspace(ctx.workspace, shown_path)
+        target = resolve_readable(ctx.workspace, ctx.read_roots, shown_path)
         # TS: os.scandir blocks (like fs.readdirSync); asyncify runs it on a worker thread and awaits it.
         return await asyncify(list_dir)(target, shown_path, args.limit)
 

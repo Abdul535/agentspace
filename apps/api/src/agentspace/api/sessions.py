@@ -17,6 +17,7 @@ from agentspace.agent.hooks import LoopConfig
 from agentspace.agent.loop import Emit, can_continue, run_loop
 from agentspace.agent.messages import AgentMessage, NoticeMessage, convert_to_llm
 from agentspace.agent.prompt import build_system_prompt
+from agentspace.agent.skills import load_skills
 from agentspace.agent.tool import ToolContext
 from agentspace.ai.catalog import CatalogError, ModelInfo, OpenRouterCatalog
 from agentspace.ai.images import MAX_INPUT_BYTES, ImageError, base64_size, process_image
@@ -318,7 +319,9 @@ async def stream_run(
     session = run.session
     run.workspace.mkdir(parents=True, exist_ok=True)
     tools = build_tools(session.tools, bash=settings.enable_bash)
-    system_prompt = build_system_prompt(session.system_prompt, tools)
+    # Rescanned every run, so an added or edited skill shows without a restart (ADR-016).
+    skills, _ = await asyncify(load_skills)(settings.resolved_skills_dir)
+    system_prompt = build_system_prompt(session.system_prompt, tools, skills)
 
     async def agent(emit: Emit, prompt: UserMessage | None) -> None:
         """One pass of the agent loop over what the model reads of the transcript so far."""
@@ -339,7 +342,7 @@ async def stream_run(
             # A copy: the run appends to its own list as messages finish.
             history=build_context(run.active.messages),
             prompt=prompt,
-            ctx=ToolContext(workspace=run.workspace),
+            ctx=ToolContext(workspace=run.workspace, read_roots=tuple(skill.base_dir for skill in skills)),
             max_turns=settings.max_turns,
             max_tokens=settings.max_output_tokens,
             thinking_level=session.thinking_level,

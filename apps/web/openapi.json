@@ -602,6 +602,123 @@
           }
         }
       }
+    },
+    "/skills": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "List Skills",
+        "description": "The skills a run started now would see, sorted by name.",
+        "operationId": "list_skills_skills_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/skills/{name}": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Get Skill",
+        "description": "One skill, read fresh: its instructions, prompt entry and files.",
+        "operationId": "get_skill_skills__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/skills/{name}/files/{path}": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "Get Skill File",
+        "description": "A text file inside the skill's folder; 404 for anything outside it, missing, binary or over 1 MB.",
+        "operationId": "get_skill_file_skills__name__files__path__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillFile"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1500,6 +1617,136 @@
         "type": "object",
         "title": "SessionUpdate",
         "description": "Fields to change on a session: the model (ADR-005) and how hard it thinks (ADR-012); unset ones stay."
+      },
+      "SkillDetail": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "prompt_entry": {
+            "type": "string",
+            "title": "Prompt Entry"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "location",
+          "tokens",
+          "content",
+          "prompt_entry",
+          "files"
+        ],
+        "title": "SkillDetail",
+        "description": "One skill with its instructions and what else its folder holds."
+      },
+      "SkillFile": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "content"
+        ],
+        "title": "SkillFile",
+        "description": "A text file inside a skill's folder."
+      },
+      "SkillList": {
+        "properties": {
+          "skills_dir": {
+            "type": "string",
+            "title": "Skills Dir"
+          },
+          "skills": {
+            "items": {
+              "$ref": "#/components/schemas/SkillPublic"
+            },
+            "type": "array",
+            "title": "Skills"
+          },
+          "diagnostics": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Diagnostics"
+          },
+          "listing_tokens": {
+            "type": "integer",
+            "title": "Listing Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "skills_dir",
+          "skills",
+          "diagnostics",
+          "listing_tokens"
+        ],
+        "title": "SkillList",
+        "description": "Every skill a run would list, plus problems with the ones it skipped or would warn about."
+      },
+      "SkillPublic": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "location": {
+            "type": "string",
+            "title": "Location"
+          },
+          "tokens": {
+            "type": "integer",
+            "title": "Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "location",
+          "tokens"
+        ],
+        "title": "SkillPublic",
+        "description": "What the model sees of a skill in its system prompt, plus its size."
       },
       "StopReason": {
         "type": "string",

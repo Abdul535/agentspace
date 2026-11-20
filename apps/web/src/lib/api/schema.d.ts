@@ -225,6 +225,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/skills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Skills
+         * @description The skills a run started now would see, sorted by name.
+         */
+        get: operations["list_skills_skills_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill
+         * @description One skill, read fresh: its instructions, prompt entry and files.
+         */
+        get: operations["get_skill_skills__name__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/skills/{name}/files/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Skill File
+         * @description A text file inside the skill's folder; 404 for anything outside it, missing, binary or over 1 MB.
+         */
+        get: operations["get_skill_file_skills__name__files__path__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -602,6 +662,64 @@ export interface components {
             /** Model */
             model?: string | null;
             thinking_level?: components["schemas"]["ThinkingLevel"] | null;
+        };
+        /**
+         * SkillDetail
+         * @description One skill with its instructions and what else its folder holds.
+         */
+        SkillDetail: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Location */
+            location: string;
+            /** Tokens */
+            tokens: number;
+            /** Content */
+            content: string;
+            /** Prompt Entry */
+            prompt_entry: string;
+            /** Files */
+            files: string[];
+        };
+        /**
+         * SkillFile
+         * @description A text file inside a skill's folder.
+         */
+        SkillFile: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+        };
+        /**
+         * SkillList
+         * @description Every skill a run would list, plus problems with the ones it skipped or would warn about.
+         */
+        SkillList: {
+            /** Skills Dir */
+            skills_dir: string;
+            /** Skills */
+            skills: components["schemas"]["SkillPublic"][];
+            /** Diagnostics */
+            diagnostics: string[];
+            /** Listing Tokens */
+            listing_tokens: number;
+        };
+        /**
+         * SkillPublic
+         * @description What the model sees of a skill in its system prompt, plus its size.
+         */
+        SkillPublic: {
+            /** Name */
+            name: string;
+            /** Description */
+            description: string;
+            /** Location */
+            location: string;
+            /** Tokens */
+            tokens: number;
         };
         /** @enum {string} */
         StopReason: "stop" | "length" | "tool_use" | "error" | "aborted";
@@ -1251,6 +1369,89 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelCatalog"];
+                };
+            };
+        };
+    };
+    list_skills_skills_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillList"];
+                };
+            };
+        };
+    };
+    get_skill_skills__name__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_skill_file_skills__name__files__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillFile"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
