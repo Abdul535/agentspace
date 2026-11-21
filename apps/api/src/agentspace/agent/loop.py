@@ -64,6 +64,7 @@ from agentspace.ai.provider import (
     Context,
     DoneEvent,
     ErrorEvent,
+    Price,
     Provider,
     TextDeltaEvent,
     ThinkingDeltaEvent,
@@ -158,6 +159,7 @@ async def run_loop(
     max_turns: int,
     max_tokens: int | None = None,
     thinking_level: ThinkingLevel = "off",
+    price: Price | None = None,
     config: LoopConfig | None = None,
     emit: Emit,
 ) -> None:
@@ -223,6 +225,7 @@ async def run_loop(
             tools=tool_specs,
             max_tokens=max_tokens,
             thinking_level=thinking_level,
+            price=price,
         )
         # TS: for await (const event of provider.stream(...)), then a switch on the event's class.
         async for event in provider.stream(model, context):

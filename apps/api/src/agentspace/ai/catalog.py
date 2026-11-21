@@ -5,6 +5,8 @@ import time
 import httpx
 from pydantic import BaseModel
 
+from agentspace.ai.provider import Price
+
 CACHE_SECONDS = 3600  # 1 hour
 FETCH_TIMEOUT = httpx.Timeout(15)
 
@@ -25,6 +27,12 @@ class ModelInfo(BaseModel):
     """Whether the model takes a thinking level (OpenRouter's `reasoning` parameter, ADR-012)."""
     image_input: bool = False
     """Whether the model can see images (`"image"` in OpenRouter's `architecture.input_modalities`, ADR-015)."""
+
+    def price(self) -> Price | None:
+        """Its list price, to estimate what a reply cost; None when either side varies or is missing."""
+        if self.input_price is None or self.output_price is None:
+            return None
+        return Price(input=self.input_price, output=self.output_price)
 
 
 class CatalogError(Exception):

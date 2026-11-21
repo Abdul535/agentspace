@@ -31,6 +31,13 @@ class ToolSpec(BaseModel):
     """JSON Schema of the arguments object."""
 
 
+class Price(BaseModel):
+    """A model's list price in US dollars per million tokens, from the catalog (ADR-005)."""
+
+    input: float
+    output: float
+
+
 class Context(BaseModel):
     """Everything one model request needs: prompt, transcript, tools and limits."""
 
@@ -41,6 +48,8 @@ class Context(BaseModel):
     """Cap on output tokens. Without one, some APIs reserve the model's maximum and refuse low-credit keys."""
     thinking_level: ThinkingLevel = "off"
     """How hard a reasoning model should think; "off" sends nothing, so the model's default applies."""
+    price: Price | None = None
+    """The model's catalog price, to estimate a reply's cost when the provider doesn't bill it; None when unknown."""
 
 
 class StartEvent(BaseModel):

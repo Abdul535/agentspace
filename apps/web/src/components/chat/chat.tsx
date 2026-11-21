@@ -7,6 +7,7 @@ import { ActivityPanel } from "@/components/chat/activity-panel";
 import { Composer } from "@/components/chat/composer";
 import { MessageList } from "@/components/chat/message-list";
 import { ModelPicker } from "@/components/chat/model-picker";
+import { SessionCost } from "@/components/chat/session-cost";
 import { ThinkingPicker } from "@/components/chat/thinking-picker";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -64,6 +65,7 @@ export function Chat({ sessionId }: { sessionId: string }) {
                 level={session.data.thinking_level}
                 running={run.running}
               />
+              <SessionCost messages={messages} />
             </>
           ) : (
             <Skeleton className="mr-auto h-4 w-48" />

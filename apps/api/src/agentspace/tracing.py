@@ -4,7 +4,7 @@ One run is one Langfuse trace, grouped by session:
 
     run (agent)                       the whole run: first prompt in, last answer out
       model (generation)              one per assistant reply: system prompt + transcript in, reply out, tokens,
-                                      latency, time to first token
+                                      cost, latency, time to first token
       <tool name> (tool)              one per tool call: arguments in, result out
       compaction (span)               when the run summarizes older messages (ADR-009)
 
@@ -104,10 +104,12 @@ class LangfuseRunTrace(RunTrace):
                 self.generation.update(
                     output=[block.model_dump() for block in message.content],
                     usage_details={"input": usage.input, "output": usage.output, "total": usage.total},
+                    **cost_details(message),
                     metadata={
                         "provider": message.provider,
                         "stop_reason": message.stop_reason,
                         "reasoning_tokens": usage.reasoning,
+                        "cost_from_provider": usage.cost.from_provider,
                     },
                     **error_level(message.stop_reason == "error", message.error_message),
                 )
@@ -153,6 +155,18 @@ class LangfuseRunTrace(RunTrace):
             self.root.end()
         except Exception:
             log.warning("Tracing failed closing a run", exc_info=True)
+
+
+def cost_details(message: AssistantMessage) -> dict[str, Any]:
+    """Our cost for the generation (step 34); nothing when we have no price, so Langfuse falls back to its own."""
+    cost = message.usage.cost
+    if not cost.total:
+        return {}
+    details = {"total": cost.total}
+    # Langfuse keeps the `total` we send even when input + output differ, as with BYOK's added upstream cost.
+    if cost.input or cost.output:
+        details |= {"input": cost.input, "output": cost.output}
+    return {"cost_details": details}
 
 
 def error_level(failed: bool, message: str | None) -> dict[str, Any]:

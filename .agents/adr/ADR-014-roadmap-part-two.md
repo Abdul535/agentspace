@@ -86,10 +86,13 @@ ADR-003 stays as it is for steps 1–25.
     out of one process (a DB lock, then a shared stream such as Redis Streams),
     so the API can run with several workers. Deferred by ADR-007; supersedes part
     of it. Needs step 32.
-34. [ ] **Usage and cost.** Price each reply from the catalog (OpenRouter's
+34. [x] **Usage and cost.** Price each reply from the catalog (OpenRouter's
     `pricing`, or its billed cost when sent), save it on `Usage`, and show a
     per-session total in the UI.
     *pi:* `cost` in `ai/src/types.ts`, `usage-totals.ts`.
+    Built as follows (ADR-019): the adapter estimates from the catalog price on
+    `Context`, then uses OpenRouter's billed `usage.cost` when sent; the chat
+    header sums the transcript; Langfuse gets it as `cost_details`.
 35. [x] **Observability.** A trace per run: each model call (model, tokens,
     cost, latency) and each tool call, viewable later, with an optional export
     to a tracing tool such as Langfuse. Needs step 34.
@@ -100,8 +103,7 @@ ADR-003 stays as it is for steps 1–25.
       tool observations, compaction spans, all under a `run` root grouped by
       session. Fed from `RunManager.drive`'s `emit`; the loop is unchanged.
     - Off unless `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set; tracing
-      errors are logged, never raised. Cost is Langfuse's own estimate until
-      step 34 sends ours.
+      errors are logged, never raised. Step 34 (ADR-019) now sends our cost.
 36. [ ] **Prompt caching.** Mark the stable start of the request (system prompt,
     tools, older turns) as cacheable, and count cache reads/writes in `Usage`.
     Needs step 20 (Anthropic adapter), where it matters most.
