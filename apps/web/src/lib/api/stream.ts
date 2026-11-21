@@ -8,6 +8,12 @@ type MessageCreate = components["schemas"]["MessageCreate"];
 /** What the run streams carry: agent events, plus a snapshot first when attaching. */
 export type RunStreamEvent = AgentEvent | RunSnapshot;
 
+/** One streamed event and its SSE id, which resumes the stream right after it (ADR-028); null when it has none. */
+export type RunStreamItem = { id: string | null; event: RunStreamEvent };
+
+/** The server answered with an error status: retrying the same request won't help. */
+export class HttpError extends Error {}
+
 /**
  * Send a prompt (text, images or both) and yield the run's events as they stream in.
  *
@@ -19,7 +25,7 @@ export async function* streamPrompt(
   content: string,
   images: string[],
   signal: AbortSignal,
-): AsyncGenerator<RunStreamEvent> {
+): AsyncGenerator<RunStreamItem> {
   // Images go as base64 data URLs; the server reads their type from the bytes and shrinks them (ADR-015).
   const body: MessageCreate = { content, images: images.map((data) => ({ data })) };
   yield* readEvents(
@@ -33,7 +39,7 @@ export async function* streamPrompt(
 }
 
 /** Continue the transcript as it is, with no new message (a retry); streams like `streamPrompt`. */
-export async function* streamContinue(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamEvent> {
+export async function* streamContinue(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamItem> {
   yield* readEvents(
     await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/continue`, {
       method: "POST",
@@ -44,7 +50,7 @@ export async function* streamContinue(sessionId: string, signal: AbortSignal): A
 }
 
 /** Summarize the older part of the transcript now (ADR-009); streams like `streamPrompt`. */
-export async function* streamCompact(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamEvent> {
+export async function* streamCompact(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamItem> {
   yield* readEvents(
     await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/compact`, {
       method: "POST",
@@ -54,22 +60,35 @@ export async function* streamCompact(sessionId: string, signal: AbortSignal): As
   );
 }
 
-/** Attach to a session's run: a `run_snapshot` first, then live events until the run ends. */
-export async function* watchRun(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamEvent> {
+/**
+ * Attach to a session's run: a `run_snapshot` first, then live events until the run ends.
+ *
+ * With `lastEventId`, the server sends only the events after it instead of a snapshot,
+ * or a snapshot if it can no longer replay them (ADR-028).
+ */
+export async function* watchRun(
+  sessionId: string,
+  signal: AbortSignal,
+  lastEventId?: string,
+): AsyncGenerator<RunStreamItem> {
   yield* readEvents(
     await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/events`, {
-      headers: { ...(await authHeaders()), accept: "text/event-stream" },
+      headers: {
+        ...(await authHeaders()),
+        accept: "text/event-stream",
+        ...(lastEventId ? { "last-event-id": lastEventId } : {}),
+      },
       signal,
     }),
   );
 }
 
 // Splits a fetch body into SSE events: EventSource can't POST, and fetch also lets us read error bodies.
-async function* readEvents(response: Response): AsyncGenerator<RunStreamEvent> {
+async function* readEvents(response: Response): AsyncGenerator<RunStreamItem> {
   if (!response.ok || !response.body) {
     if (response.status === 401) onSessionEnded();
     const body = await response.json().catch(() => null);
-    throw new Error(body ? errorMessage(body) : `HTTP ${response.status}`);
+    throw new HttpError(body ? errorMessage(body) : `HTTP ${response.status}`);
   }
 
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
@@ -87,12 +106,12 @@ async function* readEvents(response: Response): AsyncGenerator<RunStreamEvent> {
   }
 }
 
-// One SSE block's `data` lines, joined and parsed.
-function parseEvent(block: string): RunStreamEvent | null {
-  const data = block
-    .split("\n")
-    .filter((line) => line.startsWith("data:"))
-    .map((line) => line.slice(5).replace(/^ /, ""))
-    .join("\n");
-  return data ? (JSON.parse(data) as RunStreamEvent) : null;
+// One SSE block's `data` lines, joined and parsed, with its `id`; null for a block with no data (a `: ping`).
+function parseEvent(block: string): RunStreamItem | null {
+  const lines = block.split("\n");
+  // The text after `field:`, minus the one optional space the SSE format allows.
+  const values = (field: string) =>
+    lines.filter((line) => line.startsWith(`${field}:`)).map((line) => line.slice(field.length + 1).replace(/^ /, ""));
+  const data = values("data").join("\n");
+  return data ? { id: values("id").at(-1) ?? null, event: JSON.parse(data) as RunStreamEvent } : null;
 }

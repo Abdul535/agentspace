@@ -108,6 +108,8 @@ export interface paths {
          * @description Start a run on a new user message and stream its events as SSE.
          *
          *     Each SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.
+         *     Its `id` numbers the event in the run (ADR-028): send the last one as `Last-Event-ID`
+         *     to `GET .../events` after a dropped connection to get only what was missed.
          *     The server owns the run (ADR-007): closing this stream only stops listening.
          *     Reattach with `GET .../events`; stop the run with `POST .../abort`.
          */
@@ -174,7 +176,10 @@ export interface paths {
          * Watch Session
          * @description Attach to the session's run: a `run_snapshot` first, then live events until the run ends.
          *
-         *     With no run in progress, the stream is one snapshot of the saved transcript.
+         *     With `Last-Event-ID` from this run (ADR-028), the stream skips the snapshot and sends
+         *     only the events after that id. If they can't be replayed (another run, or too old),
+         *     it falls back to a snapshot. With no run in progress, the stream is one snapshot of
+         *     the saved transcript.
          */
         get: operations["watch_session_sessions__session_id__events_get"];
         put?: never;
@@ -1543,13 +1548,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Successful Response */
+            /** @description The run's events, as SSE. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": unknown;
+                    "text/event-stream": components["schemas"]["AgentEvent"];
                 };
             };
             /** @description Validation Error */
@@ -1574,13 +1579,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The run's events, as SSE. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": unknown;
+                    "text/event-stream": components["schemas"]["AgentEvent"];
                 };
             };
             /** @description Validation Error */
@@ -1605,13 +1610,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description The run's events, as SSE. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": unknown;
+                    "text/event-stream": components["schemas"]["AgentEvent"];
                 };
             };
             /** @description Validation Error */
@@ -1628,7 +1633,9 @@ export interface operations {
     watch_session_sessions__session_id__events_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "last-event-id"?: string | null;
+            };
             path: {
                 session_id: string;
             };
@@ -1636,13 +1643,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description A snapshot, or the missed events, then live ones. */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "text/event-stream": unknown;
+                    "text/event-stream": components["schemas"]["RunSnapshot"] | components["schemas"]["AgentEvent"];
                 };
             };
             /** @description Validation Error */

@@ -258,7 +258,7 @@
           "sessions"
         ],
         "summary": "Send Message",
-        "description": "Start a run on a new user message and stream its events as SSE.\n\nEach SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.\nThe server owns the run (ADR-007): closing this stream only stops listening.\nReattach with `GET .../events`; stop the run with `POST .../abort`.",
+        "description": "Start a run on a new user message and stream its events as SSE.\n\nEach SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.\nIts `id` numbers the event in the run (ADR-028): send the last one as `Last-Event-ID`\nto `GET .../events` after a dropped connection to get only what was missed.\nThe server owns the run (ADR-007): closing this stream only stops listening.\nReattach with `GET .../events`; stop the run with `POST .../abort`.",
         "operationId": "send_message_sessions__session_id__messages_post",
         "security": [
           {
@@ -288,18 +288,14 @@
         },
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The run's events, as SSE.",
             "content": {
               "text/event-stream": {
                 "itemSchema": {
                   "type": "object",
                   "properties": {
                     "data": {
-                      "type": "string",
-                      "contentMediaType": "application/json",
-                      "contentSchema": {
-                        "$ref": "#/components/schemas/AgentEvent"
-                      }
+                      "type": "string"
                     },
                     "event": {
                       "type": "string"
@@ -311,10 +307,10 @@
                       "type": "integer",
                       "minimum": 0
                     }
-                  },
-                  "required": [
-                    "data"
-                  ]
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvent"
                 }
               }
             }
@@ -358,18 +354,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The run's events, as SSE.",
             "content": {
               "text/event-stream": {
                 "itemSchema": {
                   "type": "object",
                   "properties": {
                     "data": {
-                      "type": "string",
-                      "contentMediaType": "application/json",
-                      "contentSchema": {
-                        "$ref": "#/components/schemas/AgentEvent"
-                      }
+                      "type": "string"
                     },
                     "event": {
                       "type": "string"
@@ -381,10 +373,10 @@
                       "type": "integer",
                       "minimum": 0
                     }
-                  },
-                  "required": [
-                    "data"
-                  ]
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvent"
                 }
               }
             }
@@ -428,18 +420,14 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "The run's events, as SSE.",
             "content": {
               "text/event-stream": {
                 "itemSchema": {
                   "type": "object",
                   "properties": {
                     "data": {
-                      "type": "string",
-                      "contentMediaType": "application/json",
-                      "contentSchema": {
-                        "$ref": "#/components/schemas/AgentEvent"
-                      }
+                      "type": "string"
                     },
                     "event": {
                       "type": "string"
@@ -451,10 +439,10 @@
                       "type": "integer",
                       "minimum": 0
                     }
-                  },
-                  "required": [
-                    "data"
-                  ]
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AgentEvent"
                 }
               }
             }
@@ -478,7 +466,7 @@
           "sessions"
         ],
         "summary": "Watch Session",
-        "description": "Attach to the session's run: a `run_snapshot` first, then live events until the run ends.\n\nWith no run in progress, the stream is one snapshot of the saved transcript.",
+        "description": "Attach to the session's run: a `run_snapshot` first, then live events until the run ends.\n\nWith `Last-Event-ID` from this run (ADR-028), the stream skips the snapshot and sends\nonly the events after that id. If they can't be replayed (another run, or too old),\nit falls back to a snapshot. With no run in progress, the stream is one snapshot of\nthe saved transcript.",
         "operationId": "watch_session_sessions__session_id__events_get",
         "security": [
           {
@@ -494,30 +482,34 @@
               "type": "string",
               "title": "Session Id"
             }
+          },
+          {
+            "name": "last-event-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Last-Event-Id"
+            }
           }
         ],
         "responses": {
           "200": {
-            "description": "Successful Response",
+            "description": "A snapshot, or the missed events, then live ones.",
             "content": {
               "text/event-stream": {
                 "itemSchema": {
                   "type": "object",
                   "properties": {
                     "data": {
-                      "type": "string",
-                      "contentMediaType": "application/json",
-                      "contentSchema": {
-                        "anyOf": [
-                          {
-                            "$ref": "#/components/schemas/RunSnapshot"
-                          },
-                          {
-                            "$ref": "#/components/schemas/AgentEvent"
-                          }
-                        ],
-                        "title": "Streamitem Watch Session Sessions  Session Id  Events Get"
-                      }
+                      "type": "string"
                     },
                     "event": {
                       "type": "string"
@@ -529,10 +521,18 @@
                       "type": "integer",
                       "minimum": 0
                     }
-                  },
-                  "required": [
-                    "data"
-                  ]
+                  }
+                },
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/RunSnapshot"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AgentEvent"
+                    }
+                  ],
+                  "title": "Response 200 Watch Session Sessions  Session Id  Events Get"
                 }
               }
             }

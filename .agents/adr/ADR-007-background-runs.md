@@ -1,6 +1,6 @@
 # ADR-007 — Background runs: the server owns a run; clients subscribe, reconnect and abort
 
-- **Status:** Accepted
+- **Status:** Accepted; superseded in part by ADR-028 (a reconnect resumes from `Last-Event-ID` instead of a fresh snapshot)
 - **Date:** 2026-11-19
 - **Deciders:** project owner
 

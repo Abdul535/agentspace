@@ -134,6 +134,12 @@ export function Chat({ sessionId }: { sessionId: string }) {
               <AlertDescription>{run.error}</AlertDescription>
             </Alert>
           )}
+          {run.reconnecting && (
+            <p role="status" className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Connection lost. Reconnecting…
+            </p>
+          )}
           {run.compacting && (
             <p role="status" className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />

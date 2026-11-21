@@ -6,7 +6,15 @@ import { useEffect, useRef, useState } from "react";
 import { api, errorMessage, type Message } from "./client";
 import { textOf } from "./content";
 import { queryKeys } from "./queries";
-import { type RunStreamEvent, streamCompact, streamContinue, streamPrompt, watchRun } from "./stream";
+import {
+  HttpError,
+  type RunStreamEvent,
+  type RunStreamItem,
+  streamCompact,
+  streamContinue,
+  streamPrompt,
+  watchRun,
+} from "./stream";
 
 /** Where a message typed during a run goes: after the current turn, or once the run would stop. */
 export type QueueKind = "steer" | "follow_up";
@@ -30,6 +38,8 @@ type RunState = {
   toolOutput: Map<string, string>;
   /** The run is summarizing older messages (ADR-009). */
   compacting: boolean;
+  /** The stream dropped mid-run and is being reopened after the last event seen (ADR-028). */
+  reconnecting: boolean;
   error: string | null;
 };
 
@@ -42,8 +52,25 @@ const idle: RunState = {
   pendingTools: new Set(),
   toolOutput: new Map(),
   compacting: false,
+  reconnecting: false,
   error: null,
 };
+
+// Tries to reopen a dropped stream before giving up; the waits add up to about half a minute.
+const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000, 8000, 8000];
+
+// Resolves after `ms`, or as soon as `signal` aborts.
+function wait(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
+  });
+}
+
+// Whether this event means the run is over, so the stream closing after it is expected.
+function endsRun(event: RunStreamEvent): boolean {
+  return event.type === "agent_end" || (event.type === "run_snapshot" && !event.running);
+}
 
 // Applies one streamed event to the live run state.
 function reduce(s: RunState, event: RunStreamEvent): RunState {
@@ -113,7 +140,8 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
   const controller = useRef<AbortController | null>(null);
 
   // Reads one run stream into state; when it ends, swaps the live copy for the saved transcript.
-  async function listen(open: (signal: AbortSignal) => AsyncGenerator<RunStreamEvent>) {
+  // A stream that drops before the run ends is reopened after the last event seen (ADR-028).
+  async function listen(open: (signal: AbortSignal) => AsyncGenerator<RunStreamItem>) {
     if (controller.current) return;
     const abort = new AbortController();
     controller.current = abort;
@@ -121,25 +149,60 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
 
     let error: string | null = null;
     let started = false;
-    try {
-      for await (const event of open(abort.signal)) {
-        // The server has claimed the run by its first event: refresh the sidebar so its spinner shows now.
-        if (!started) {
-          started = true;
-          void queryClient.invalidateQueries({ queryKey: queryKeys.sessions, exact: true });
-        }
-        // A queued message the agent picked up comes back as a user `message_end`: it's no longer queued.
-        if (event.type === "message_end" && event.message.role === "user") {
-          const content = event.message.content;
-          const index = queuedRef.current.findIndex((q) => q.content === content);
-          if (index !== -1) updateQueued(queuedRef.current.toSpliced(index, 1));
-        }
-        // A failed compaction leaves no message behind, so its reason is kept to show once the run ends.
-        if (event.type === "compaction_end" && event.error) error = event.error;
-        setState((s) => reduce(s, event));
+    let lastId: string | null = null;
+    let ended = false;
+    let attempt = 0;
+    let source = open;
+
+    // Applies one event to state; the same for the first stream and any reopened one.
+    function handle(event: RunStreamEvent) {
+      // The server has claimed the run by its first event: refresh the sidebar so its spinner shows now.
+      if (!started) {
+        started = true;
+        void queryClient.invalidateQueries({ queryKey: queryKeys.sessions, exact: true });
       }
-    } catch (e) {
-      if (!abort.signal.aborted) error = e instanceof Error ? e.message : String(e);
+      // A queued message the agent picked up comes back as a user `message_end`: it's no longer queued.
+      if (event.type === "message_end" && event.message.role === "user") {
+        const content = event.message.content;
+        const index = queuedRef.current.findIndex((q) => q.content === content);
+        if (index !== -1) updateQueued(queuedRef.current.toSpliced(index, 1));
+      }
+      // A failed compaction leaves no message behind, so its reason is kept to show once the run ends.
+      if (event.type === "compaction_end" && event.error) error = event.error;
+      setState((s) => reduce(s, event));
+    }
+
+    try {
+      while (!abort.signal.aborted) {
+        try {
+          for await (const { id, event } of source(abort.signal)) {
+            if (id) lastId = id;
+            if (attempt > 0) {
+              attempt = 0;
+              setState((s) => ({ ...s, reconnecting: false }));
+            }
+            if (endsRun(event)) ended = true;
+            handle(event);
+          }
+        } catch (e) {
+          // Stopped on purpose, refused by the server, or failed before the run sent anything: don't retry.
+          if (abort.signal.aborted) break;
+          if (e instanceof HttpError || lastId === null) {
+            error = e instanceof Error ? e.message : String(e);
+            break;
+          }
+        }
+        if (ended || abort.signal.aborted || lastId === null) break;
+        if (attempt >= RECONNECT_DELAYS_MS.length) {
+          error = "Lost the connection to the agent. It may still be running: reload the page to reattach.";
+          break;
+        }
+        setState((s) => ({ ...s, reconnecting: true }));
+        await wait(RECONNECT_DELAYS_MS[attempt], abort.signal);
+        attempt += 1;
+        const after = lastId;
+        source = (signal) => watchRun(sessionId, signal, after);
+      }
     } finally {
       // Stopped listening on purpose (unmounted): another listener may already own the state.
       if (controller.current === abort) {
