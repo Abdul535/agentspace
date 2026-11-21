@@ -14,6 +14,7 @@ from agentspace.api.sessions import router as sessions_router
 from agentspace.api.skills import router as skills_router
 from agentspace.auth import TokenVerifier, require_user
 from agentspace.config import Settings, get_settings
+from agentspace.encryption import SecretBox, load_server_secret
 from agentspace.mcp.manager import McpManager
 from agentspace.runs import RunManager
 from agentspace.session.db import create_engine, session_factory
@@ -30,12 +31,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # TS: code before `yield` runs at startup and code after it at shutdown, like a setup that returns a cleanup.
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """Startup: make the data folder, migrate the DB, open the engine. Shutdown: stop runs, MCP, tracing, the DB."""
+        """Startup: data folder, secret key, migrations, the engine. Shutdown: stop runs, MCP, tracing, the DB."""
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         if app.state.auth is None:
             log.warning("AGENTSPACE_SUPABASE_URL is not set: no login, anyone who reaches the API can use it.")
+        # Before migrating: a migration encrypts the MCP env values saved before ADR-025.
+        app.state.secret_box = SecretBox(load_server_secret(settings.secret_key, settings.data_dir))
         if settings.auto_migrate:
-            await asyncify(upgrade_to_head)(settings.resolved_database_url)
+            await asyncify(upgrade_to_head)(settings.resolved_database_url, app.state.secret_box)
         engine = create_engine(settings.resolved_database_url)
         # TS: app.state is like Express's app.locals: values every request can reach.
         app.state.settings = settings

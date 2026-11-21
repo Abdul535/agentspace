@@ -1,4 +1,4 @@
-"""FastAPI dependencies shared by the routes: settings, database, store, provider, model catalog, runs and run slot."""
+"""FastAPI dependencies shared by the routes: settings, database, user, store, provider, catalog, runs and run slot."""
 
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -6,15 +6,18 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
+from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.ai.provider import Provider
 from agentspace.ai.providers import UnknownProviderError, get_provider
+from agentspace.auth import AuthUser, require_user
 from agentspace.config import Settings
+from agentspace.encryption import SecretBox
 from agentspace.runs import ActiveRun, RunManager, SessionBusyError
 from agentspace.session.db import open_db
-from agentspace.session.models import SessionRow
+from agentspace.session.models import LOCAL_USER_ID, SessionRow, UserRow
 from agentspace.session.store import SessionStore
 
 
@@ -38,9 +41,35 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
 DBDep = Annotated[AsyncSession, Depends(get_db)]
 
 
-def get_store(db: DBDep) -> SessionStore:
-    """The session store on this request's DB session."""
-    return SessionStore(db)
+async def get_user(db: DBDep, auth: Annotated[AuthUser | None, Depends(require_user)]) -> UserRow:
+    """The caller's user row, saved on their first request; the local user when there is no login (ADR-025)."""
+    # TS: `a if cond else b` is `cond ? a : b`; no token (local mode) means the local user.
+    user_id, email = (auth.id, auth.email) if auth else (LOCAL_USER_ID, None)
+    user = await db.get(UserRow, user_id)
+    if user is None:
+        user = UserRow(id=user_id, email=email)
+        db.add(user)
+        try:
+            await db.commit()
+        except IntegrityError:
+            # Two first requests at once: the other one saved the row first.
+            await db.rollback()
+            user = await db.get(UserRow, user_id)
+            assert user is not None
+    elif email and user.email != email:
+        # The email changed at the provider; keep ours current.
+        user.email = email
+        db.add(user)
+        await db.commit()
+    return user
+
+
+UserDep = Annotated[UserRow, Depends(get_user)]
+
+
+def get_store(db: DBDep, user: UserDep) -> SessionStore:
+    """The caller's session store on this request's DB session: it only sees their sessions."""
+    return SessionStore(db, user.id)
 
 
 StoreDep = Annotated[SessionStore, Depends(get_store)]
@@ -63,7 +92,7 @@ CatalogDep = Annotated[OpenRouterCatalog, Depends(get_catalog)]
 
 
 async def get_session_row(session_id: str, store: StoreDep) -> SessionRow:
-    """The session named in the path, or a 404."""
+    """The caller's session named in the path, or a 404, also when it is someone else's, so that leaks nothing."""
     session = await store.get(session_id)
     if session is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"Session {session_id} not found.")
@@ -71,6 +100,14 @@ async def get_session_row(session_id: str, store: StoreDep) -> SessionRow:
 
 
 SessionRowDep = Annotated[SessionRow, Depends(get_session_row)]
+
+
+def get_secret_box(request: Request) -> SecretBox:
+    """Encrypts and decrypts users' MCP env values (ADR-025)."""
+    return request.app.state.secret_box
+
+
+SecretBoxDep = Annotated[SecretBox, Depends(get_secret_box)]
 
 
 def get_runs(request: Request) -> RunManager:

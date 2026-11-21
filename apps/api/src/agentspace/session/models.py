@@ -22,7 +22,22 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+LOCAL_USER_ID = "local"
+"""The one user of local mode (no login), who also owns every row made before users existed (ADR-025)."""
+
+
 # TS: like a Drizzle table definition: one class is both the table schema and the row type.
+class UserRow(SQLModel, table=True):
+    """Someone who signed in; their sessions and MCP servers are theirs alone (ADR-025)."""
+
+    __tablename__ = "users"
+
+    id: str = Field(primary_key=True)
+    """The sign-in provider's user id (Supabase's `sub`), or `local`."""
+    email: str | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class SessionRow(SQLModel, table=True):
     """One session: which provider and model it uses, how hard it thinks, and its system prompt."""
 
@@ -30,6 +45,8 @@ class SessionRow(SQLModel, table=True):
 
     # TS: `lambda: ...` is an arrow function, here `() => crypto.randomUUID()` without dashes.
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    user_id: str = Field(foreign_key="users.id", index=True, ondelete="CASCADE")
+    """Who owns it; every query filters by it, so other users can't see it exists."""
     title: str | None = None
     provider: str
     model: str
@@ -62,18 +79,20 @@ class MessageRow(SQLModel, table=True):
 
 
 class McpServerRow(SQLModel, table=True):
-    """One MCP server from the settings page and the command that starts it; every enabled one joins every run."""
+    """One MCP server from the settings page and the command that starts it; every enabled one joins its user's runs."""
 
     __tablename__ = "mcp_servers"
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
 
     id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
-    name: str = Field(unique=True)
-    """Names its tools `mcp__<name>__<tool>`; letters, digits, `_` and `-` only."""
+    user_id: str = Field(foreign_key="users.id", index=True, ondelete="CASCADE")
+    name: str
+    """Unique per user. Names its tools `mcp__<name>__<tool>`; letters, digits, `_` and `-` only."""
     command: str
     """One executable, not a shell line: e.g. `npx`."""
     args: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     env: dict[str, str] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    """Extra environment variables for the process; stored as plain text (ADR-017)."""
+    """Extra environment variables for the process; each value is encrypted for its user (ADR-025)."""
     enabled: bool = True
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)

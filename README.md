@@ -79,6 +79,10 @@ Sign-in (Google through Supabase, ADR-024) is on when `AGENTSPACE_SUPABASE_URL` 
 `NEXT_PUBLIC_SUPABASE_URL` plus `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in `apps/web/.env.local`. Without them the
 app runs in local mode: no login, anyone who reaches the API can use it.
 
+Each signed-in user sees only their own sessions and MCP servers (ADR-025). Local mode, and everything saved before
+users existed, belongs to one built-in `local` user. MCP env values are encrypted with `AGENTSPACE_SECRET_KEY`; without
+it the API generates `apps/api/data/secret.key`. Back that key up: without it, saved MCP env values can't be read.
+
 ## Development
 
 ```bash

@@ -37,7 +37,9 @@ Environment variables (or `.env`): `OPENROUTER_API_KEY`, `AGENTSPACE_DEFAULT_MOD
 refuses a request whose cap is above what the key's remaining credit covers), `AGENTSPACE_ENABLE_BASH`
 (default `false`; gives sessions the `bash` tool, which runs commands unsandboxed as your user), `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (both set turns on a Langfuse trace per run, ADR-018;
 `LANGFUSE_BASE_URL` defaults to the EU cloud, `https://us.cloud.langfuse.com` for the US one),
-`AGENTSPACE_SUPABASE_URL` (set: every route but `/health` needs a Supabase sign-in token, ADR-024). See
+`AGENTSPACE_SUPABASE_URL` (set: every route but `/health` needs a Supabase sign-in token, ADR-024),
+`AGENTSPACE_SECRET_KEY` (encrypts MCP env values, ADR-025; at least 32 characters, e.g. `openssl rand -base64 32`;
+unset, one is generated into `<data_dir>/secret.key`). See
 `src/agentspace/config.py`.
 
 ## Develop

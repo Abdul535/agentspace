@@ -1,6 +1,6 @@
 # ADR-017 — MCP servers: tools from other programs
 
-- **Status:** Accepted
+- **Status:** Accepted (env storage superseded by ADR-025: encrypted at rest)
 - **Date:** 2026-11-21
 - **Deciders:** project owner
 
