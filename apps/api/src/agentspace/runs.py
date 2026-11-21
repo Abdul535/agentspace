@@ -35,6 +35,7 @@ from agentspace.agent.messages import AgentMessage
 from agentspace.ai.messages import AssistantMessage, TextContent, ThinkingContent, UserMessage
 from agentspace.ai.provider import TextDeltaEvent, ThinkingDeltaEvent, ToolCallEndEvent
 from agentspace.session.store import SessionStore
+from agentspace.tracing import RunTrace, Tracer
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +108,8 @@ class ActiveRun:
     follow_ups: MessageQueue = field(default_factory=MessageQueue)
     accepting: bool = True
     """Whether queued messages can still reach the model; False once the run has made its last poll."""
+    trace: RunTrace = field(default_factory=RunTrace)
+    """The run's Langfuse trace (ADR-018); a no-op until `RunManager.start` sets it, or when tracing is off."""
 
     def queue(self, kind: QueueKind, message: UserMessage) -> bool:
         """Queue a message for the loop; False if the run will never pick it up."""
@@ -215,8 +218,9 @@ async def read_events(run: ActiveRun, queue: Subscriber) -> AsyncGenerator[Agent
 class RunManager:
     """Owns every running session's task; at most one run per session."""
 
-    def __init__(self, db_factory: async_sessionmaker[AsyncSession]) -> None:
+    def __init__(self, db_factory: async_sessionmaker[AsyncSession], tracer: Tracer | None = None) -> None:
         self.db_factory = db_factory
+        self.tracer = tracer or Tracer(None)
         self.runs: dict[str, ActiveRun] = {}
         # Held from "is it free?" through loading history to registering the run, so two prompts can't both pass.
         self.claim_lock = asyncio.Lock()
@@ -251,6 +255,7 @@ class RunManager:
         """Start the claimed run in the background and return the caller's subscription to it."""
         # Subscribed before the task gets to run, so the caller sees every event from `agent_start` on.
         queue = run.subscribe()
+        run.trace = self.tracer.start_run(run.session_id, run.messages)
         # TS: like starting a promise without awaiting it; the task runs on its own until done or cancelled.
         run.task = asyncio.create_task(self.drive(run, loop), name=f"run:{run.session_id}")
         # A done-callback, not a `finally` in `drive`: it runs even if the task is cancelled before it starts.
@@ -267,10 +272,11 @@ class RunManager:
                 raise LookupError(f"Session {run.session_id} disappeared before its run started.")
 
             async def emit(event: AgentEvent) -> None:
-                """Save, then update the snapshot, then publish: a client never sees a message that isn't saved."""
+                """Save, update snapshot and trace, then publish: a client never sees a message that isn't saved."""
                 if isinstance(event, MessageEndEvent):
                     await store.append(session, event.message)
                 run.track(event)
+                run.trace.observe(event)
                 run.publish(event)
 
             await loop(emit)
@@ -288,9 +294,12 @@ class RunManager:
             else:
                 reason = "error"
                 log.error("Run for session %s failed", run.session_id, exc_info=task.exception())
-            run.publish(AgentEndEvent(reason=reason, new_messages=run.messages[run.history_size :]))
+            end = AgentEndEvent(reason=reason, new_messages=run.messages[run.history_size :])
+            run.trace.observe(end)
+            run.publish(end)
         elif not task.cancelled() and (exc := task.exception()):
             log.error("Run for session %s failed after it ended", run.session_id, exc_info=exc)
+        run.trace.end()
         run.close()
 
     async def abort(self, session_id: str) -> bool:

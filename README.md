@@ -71,7 +71,8 @@ Full reasoning and trade-offs are in the ADRs: [`ADR-001`](.agents/adr/ADR-001-m
 Set in the environment or `apps/api/.env`: `OPENROUTER_API_KEY`, `AGENTSPACE_DEFAULT_MODEL`
 (default `anthropic/claude-sonnet-5.5`), `AGENTSPACE_DEFAULT_PROVIDER`, `AGENTSPACE_DATA_DIR`,
 `AGENTSPACE_DATABASE_URL`, `AGENTSPACE_MAX_TURNS`, `AGENTSPACE_MAX_OUTPUT_TOKENS`, `AGENTSPACE_ENABLE_BASH`
-(default `false`: the `bash` tool runs commands unsandboxed as your user). See
+(default `false`: the `bash` tool runs commands unsandboxed as your user), `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (both set turns on a Langfuse trace per run, ADR-018;
+`LANGFUSE_BASE_URL` defaults to the EU cloud, `https://us.cloud.langfuse.com` for the US one). See
 [`config.py`](apps/api/src/agentspace/config.py).
 
 ## Development
