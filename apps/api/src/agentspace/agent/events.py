@@ -27,8 +27,9 @@ from agentspace.ai.messages import AssistantMessage, ToolResultMessage
 from agentspace.ai.provider import TextDeltaEvent, ThinkingDeltaEvent, ToolCallEndEvent
 
 # Why a run stopped: the model answered, it hit max_turns, the provider failed, it was cancelled,
-# every tool call in the last batch asked to stop (`ToolResult.terminate`), or `finish_turn` returned "end".
-type EndReason = Literal["done", "max_turns", "error", "aborted", "terminated", "finish_turn"]
+# every tool call in the last batch asked to stop (`ToolResult.terminate`), `finish_turn` returned "end",
+# or the server driving it stopped or went silent (ADR-029).
+type EndReason = Literal["done", "max_turns", "error", "aborted", "terminated", "finish_turn", "interrupted"]
 
 # Why the run compacted: the context neared the window, the provider refused it as too long, or the user asked.
 type CompactionReason = Literal["threshold", "overflow", "manual"]

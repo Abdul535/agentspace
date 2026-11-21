@@ -4,6 +4,7 @@ import json
 from collections.abc import Iterator
 from pathlib import Path
 
+import pg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -25,7 +26,6 @@ from agentspace.ai.providers.fake import FakeProvider, text_reply, tool_reply
 from agentspace.api.deps import get_catalog, provider_lookup
 from agentspace.config import Settings
 from agentspace.main import create_app
-from agentspace.runs import ActiveRun, RunManager
 
 pytestmark = pytest.mark.anyio
 
@@ -357,9 +357,7 @@ def test_manual_compaction_refuses_a_short_or_busy_session(client: TestClient) -
     assert client.post(f"/sessions/{session_id}/compact").status_code == 422
     assert client.get(f"/sessions/{session_id}").json()["running"] is False  # the slot was given back
 
-    # Busy, as if another run had claimed it.
-    runs: RunManager = client.app.state.runs  # ty: ignore[missing-attribute]
-    runs.runs[session_id] = ActiveRun(session_id=session_id, messages=[], history_size=0)
+    pg.mark_running(session_id)  # busy, as if another server's run had claimed it
     assert client.post(f"/sessions/{session_id}/compact").status_code == 409
 
 

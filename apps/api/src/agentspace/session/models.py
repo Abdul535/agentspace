@@ -9,9 +9,9 @@ and `seq` orders it.
 import secrets
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy import Column, String, UniqueConstraint
+from sqlalchemy import Column, Index, String, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
@@ -116,3 +116,30 @@ class ProviderKeyRow(SQLModel, table=True):
     """The key's last four characters, so the settings page can show which key is saved."""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+# A run is `running` until it ends; `interrupted` means its server stopped or went silent (ADR-029).
+type RunStatus = Literal["running", "done", "aborted", "error", "interrupted"]
+
+
+class RunRow(SQLModel, table=True):
+    """One run of a session: who drives it and when they last checked in (ADR-029). Kept after it ends."""
+
+    __tablename__ = "runs"
+    __table_args__ = (
+        # One active run per session: Postgres refuses a second `running` row, even from another server.
+        Index("runs_one_active", "session_id", unique=True, postgresql_where=text("status = 'running'")),
+        # The user's running runs, counted against their cap (ADR-026).
+        Index("runs_active_by_user", "user_id", postgresql_where=text("status = 'running'")),
+    )
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex, primary_key=True)
+    session_id: str = Field(foreign_key="sessions.id", ondelete="CASCADE")
+    user_id: str = Field(foreign_key="users.id", ondelete="CASCADE")
+    status: RunStatus = Field(default="running", sa_column=Column(String, nullable=False))
+    owner: str
+    """The server process driving it: `<hostname>:<pid>:<boot id>`, new on every start."""
+    heartbeat_at: datetime = Field(default_factory=utcnow)
+    """The owner's last check-in; set from the database's clock, so servers with skewed clocks agree."""
+    started_at: datetime = Field(default_factory=utcnow)
+    ended_at: datetime | None = None

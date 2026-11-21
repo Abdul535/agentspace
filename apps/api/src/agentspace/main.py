@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 
 from asyncer import asyncify
 from fastapi import Depends, FastAPI
+from redis.asyncio import Redis
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.api.mcp_servers import router as mcp_router
@@ -17,6 +19,7 @@ from agentspace.auth import TokenVerifier, require_user
 from agentspace.config import Settings, get_settings
 from agentspace.encryption import SecretBox, load_server_secret
 from agentspace.mcp.manager import McpManager
+from agentspace.run_log import SOCKET_TIMEOUT_SECONDS
 from agentspace.runs import RunManager
 from agentspace.session.db import create_engine, session_factory
 from agentspace.session.keys import seed_local_key
@@ -33,7 +36,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # TS: code before `yield` runs at startup and code after it at shutdown, like a setup that returns a cleanup.
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """Startup: data folder, secret key, migrations, engine, local key. Shutdown: runs, MCP, tracing, the DB."""
+        """Startup: data folder, secret key, migrations, engine, Redis, local key. Shutdown: runs, MCP, tracing, DB."""
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         if app.state.auth is None:
             log.warning("AGENTSPACE_SUPABASE_URL is not set: no login, anyone who reaches the API can use it.")
@@ -56,15 +59,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     log.info("Saved OPENROUTER_API_KEY as the local user's OpenRouter key.")
         # Langfuse traces of each run (ADR-018); a no-op without keys.
         tracer = Tracer.from_settings(settings)
-        # Every session's background run (ADR-007).
-        app.state.runs = RunManager(app.state.db_factory, tracer, max_per_user=settings.max_runs_per_user)
+        # Run events and stop/steer requests, shared with every other API server (ADR-029).
+        # redis-py's default 5 s socket timeout would cut off a read that blocks for 5 s waiting for events.
+        redis = Redis.from_url(settings.redis_url, decode_responses=True, socket_timeout=SOCKET_TIMEOUT_SECONDS)
+        try:
+            await redis.ping()
+        except RedisConnectionError as exc:
+            raise RuntimeError(
+                f"No Redis at {settings.redis_url}. Locally, `bash scripts/db.sh` (or `pnpm dev:api`) starts it."
+            ) from exc
+        # Every session's background run (ADR-007), on whichever server drives it (ADR-029).
+        app.state.runs = RunManager(
+            app.state.db_factory,
+            redis,
+            prefix=settings.redis_prefix,
+            tracer=tracer,
+            max_per_user=settings.max_runs_per_user,
+            heartbeat_seconds=settings.run_heartbeat_seconds,
+            stale_seconds=settings.run_stale_seconds,
+        )
+        app.state.runs.open()
         app.state.model_catalog = OpenRouterCatalog(settings.openrouter_base_url)
         # Each session's MCP server processes (ADR-017); a running session's are never stopped as idle.
         app.state.mcp = McpManager(
             wait_timeout=settings.mcp_wait_seconds,
             call_timeout=settings.mcp_call_timeout_seconds,
             idle_timeout=settings.mcp_idle_seconds,
-            is_busy=app.state.runs.is_running,
+            is_busy=app.state.runs.owns,
         )
         app.state.mcp.start()
         yield
@@ -72,6 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await app.state.mcp.shutdown()
         # After the runs stop, so their last observations are sent too; off the event loop, since it blocks.
         await asyncify(tracer.shutdown)()
+        await redis.aclose()
         await engine.dispose()
 
     app = FastAPI(title="agentspace", lifespan=lifespan)

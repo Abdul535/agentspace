@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     """Connections kept open per API process; up to as many more open when it's busy."""
     database_statement_timeout_ms: int = Field(default=25_000, ge=1)
     """The longest one SQL statement may run before Postgres cancels it."""
+    redis_url: str = "redis://127.0.0.1:55379/0"
+    """Redis for run events and stop/steer requests, shared by every API server (ADR-029). The default is the
+    local one `pnpm dev:api` starts; production points at ElastiCache."""
+    redis_prefix: str = "agentspace:"
+    """Starts every Redis key, so tests (or two apps) can share one Redis without seeing each other's keys."""
+    run_heartbeat_seconds: float = Field(default=5, gt=0)
+    """How often a server checks in for its runs and looks for runs whose server went silent."""
+    run_stale_seconds: float = Field(default=30, gt=0)
+    """How long a run's server may stay silent before the run is marked interrupted."""
 
     default_provider: str = "openrouter"
     default_model: str = "anthropic/claude-sonnet-5.5"

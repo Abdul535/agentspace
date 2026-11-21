@@ -1,6 +1,6 @@
 # ADR-029 — Runs across several API servers: a `runs` table in Postgres, events and control in Redis Streams
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-22
 - **Deciders:** project owner
 
@@ -88,20 +88,22 @@ both want the history).
   `finish_turn` and `terminated` end as `done`; `aborted` and `error` as
   themselves. `interrupted` is new: no one heard from the owner. It is also a new
   `EndReason`, so the web client can say what happened ("The server running this
-  reply stopped. What was saved is kept; send a message to go on.").
+  reply stopped before it finished. What was saved is kept: press Continue or
+  send a message to go on.").
 - **Heartbeat: every 5 s.** Each task runs one background loop that does
   `UPDATE runs SET heartbeat_at = now() WHERE owner = :me AND status = 'running'
   RETURNING id`. One query per task, not per run. A run of ours that the query
   did not return was swept by someone else (we were paused or cut off): we cancel
   it locally, so a run never has two drivers.
 - **Stale after 30 s** (six missed beats), long enough to ride out a GC pause or
-  a slow database.
+  a slow database. Both are settings (`AGENTSPACE_RUN_HEARTBEAT_SECONDS`,
+  `AGENTSPACE_RUN_STALE_SECONDS`), so tests can shorten them.
 - **Who sweeps, and when:** every task, in the same 5 s loop, runs
   `UPDATE runs SET status = 'interrupted', ended_at = now() WHERE status = 'running'
   AND heartbeat_at < now() - interval '30 seconds' RETURNING id, session_id`.
   Postgres row locks make two sweepers safe: each row is returned to only one of
-  them, and that one appends the closing `agent_end` (`interrupted`) to the
-  session's Stream, so every open stream ends with a cue. `claim` also sweeps the
+  them, and that one appends the closing `agent_end` (`interrupted`) and the end
+  marker to the session's Stream, so every open stream ends with a cue. `claim` also sweeps the
   session and the user before it counts, so a dead task's run never blocks a new
   prompt for longer than the stale timeout. The database's clock is the only
   clock, so tasks with skewed clocks agree.
@@ -132,41 +134,49 @@ both want the history).
   `use-agent-run.ts` keeps the last one and sends it back as `Last-Event-ID`,
   and never parses it.
 - **Reading.** Every SSE stream reads from Redis, the owner's own `POST
-  …/messages` stream included, so there is one path. Each task runs **one reader
-  per session it has listeners for** (`XREAD BLOCK … STREAMS key <last id>`), and
-  it hands each entry to that session's local `asyncio.Queue` subscribers, as
-  `publish` does today. The reader starts with the first listener and stops with
-  the last. So Redis connections grow with the sessions watched on a task, not
-  with its open tabs.
+  …/messages` stream included, so there is one path. Each open stream runs its
+  own `XREAD BLOCK 5000 … STREAMS key <last id>` loop, so it holds one Redis
+  connection while it waits. That is the simplest exact design: every stream
+  reads from its own position, with no hand-over between a catch-up read and a
+  shared live feed. One shared reader per session per task can come later if
+  connection counts ever matter.
 - **Resume (`Last-Event-ID`).** Exact or not at all, as in ADR-028. The id is
-  replayed when it parses as a Stream id, its entry's `run` is the running run,
-  and nothing after it was trimmed. The last check is Redis 7's `XINFO STREAM`
-  `max-deleted-entry-id`: if the client's id is at or after it, every later entry
-  is still there. Otherwise (an old `<run_id>.<seq>` id from before the deploy,
-  another run, or too old) the stream falls back to a snapshot.
-- **Snapshot, built by any task.** Two fields mark checkpoints: the
-  `agent_start` entry and every `message_end` entry also carry `saved` (the
-  transcript length once that message is in Postgres) and `pending` (the tool
-  calls still running). To build a snapshot, a task reads the Stream backwards to
-  the run's newest checkpoint and loads `messages[:saved]` from Postgres. Messages
-  are append-only (`MessageRow.seq`), so that is exactly the transcript at the
-  checkpoint. It then folds the entries after it with today's `ActiveRun.track`,
-  which rebuilds the reply being written. The snapshot's id is the last entry it
-  folded. It never reads the owner's memory, so the owner can be busy, or on
-  another machine. Only a single reply of more than 10,000 events can lose its
-  checkpoint to trimming; then the snapshot shows the saved messages and the
-  reply catches up from its next `message_start`.
-- **End of a stream:** the run's `agent_end` entry (written by the owner, or by
-  a sweeper for `interrupted`). With no `running` row, `GET …/events` is one
-  snapshot of the saved transcript, as today.
+  replayed when it parses as a Stream id and its entry is still in the Stream
+  and belongs to the running run. Trimming only drops the oldest entries, so then
+  every entry after it is there too. The run may have ended since: its Stream
+  outlives it by an hour, so the client still gets the tail, ending with the
+  `agent_end`. That matters on a deploy, where the client's stream dies with its
+  server and reconnects elsewhere; that way it learns the run was interrupted
+  instead of finding the reply silently cut short. Otherwise (an old
+  `<run_id>.<seq>` id from before the deploy, another run, or too old) the stream
+  falls back to a snapshot.
+- **Snapshot, built by any task.** Checkpoints carry two more fields: `saved`
+  (the transcript length in Postgres at that point) and `pending` (the tool calls
+  still running). The first checkpoint is an entry with no event, written by
+  `claim`. After that, every `message_end` entry is one. To build a snapshot, a
+  task reads the Stream backwards to the run's newest checkpoint and loads
+  `messages[:saved]` from Postgres. Messages are append-only (`MessageRow.seq`),
+  so that is exactly the transcript at the checkpoint. It then folds the entries
+  after it with `ActiveRun.track`, which rebuilds the reply being written. The
+  snapshot's id is the last entry it folded. It never reads the owner's memory,
+  so the owner can be busy, or on another machine. Only a single reply of more
+  than 10,000 events can lose its checkpoint to trimming. Then the snapshot
+  replays what is left over the saved transcript.
+- **End of a stream:** an end-marker entry (`run <id> end 1`). The run's
+  `agent_end` can't be it: after one, the loop may still compact and run again.
+  The owner writes the marker when its task is done, after ending the row. A
+  sweeper writes it for a run it ended. A stream whose read comes back empty
+  also checks the `runs` row, so a run whose marker never reached Redis (lost in
+  a failover) still ends its streams. With no `running` row, `GET …/events` is
+  one snapshot of the saved transcript, as today.
 - **Cleanup.** When a run ends, the owner sets `EXPIRE key 3600`: the tail stays
-  an hour for slow reconnects, then Redis frees it. The next run's first `XADD`
-  clears the expiry (`PERSIST`) and trims earlier runs away
-  (`XTRIM MINID <its own first id>`), so the Stream only ever holds the current
-  run, or the last one.
+  an hour for slow reconnects, then Redis frees it. `claim` empties the Stream
+  for the next run (`XTRIM MAXLEN 0`, exact, then `PERSIST`) in the same
+  transaction that writes its first checkpoint. So the Stream only ever holds the
+  current run, or the last one.
 
 ### 3. Stop, steer and follow-up: a control Stream per owning task
-- **Key** `<prefix>task:<owner>:control`. Each task reads only its own, with one
+- **Key** `<prefix>server:<owner>:control`. Each task reads only its own, with one
   `XREAD BLOCK` loop. Entries name the run:
   `run <run_id> kind abort|steer|follow_up content <text>`. A Stream, not
   pub/sub, so a message sent while the owner was reconnecting to Redis is read
@@ -206,9 +216,9 @@ both want the history).
 The setting, the error codes and the UI stay as ADR-026 has them.
 
 ### 5. Local dev, CI and tests
-- **Redis 8.2** (`redis:8.2-alpine` on Docker Hub). Stream trimming by `MINID`,
-  `max-deleted-entry-id` and the rest need Redis 7 or later; production uses
-  ElastiCache for Valkey 8, which speaks the same protocol (step 58 sets it up).
+- **Redis 8.2** (`redis:8.2-alpine` on Docker Hub). Streams need Redis 5 or
+  later; production uses ElastiCache for Valkey 8, which speaks the same protocol
+  (step 58 sets it up).
   Python client: `redis` (redis-py, which ships `redis.asyncio`), added with
   `uv add redis`.
 - **Local dev: started by `scripts/db.sh`,** next to Postgres, not by a
@@ -230,9 +240,8 @@ The setting, the error codes and the UI stay as ADR-026 has them.
   `redis-cli ping`, and `AGENTSPACE_TEST_REDIS_URL` set like
   `AGENTSPACE_TEST_DATABASE_URL`.
 - **Tests: real Redis, no fake,** for the same reason ADR-027 chose real Postgres.
-  The behavior we rely on (blocking `XREAD` across connections, approximate
-  trimming, `max-deleted-entry-id`, `EXPIRE` on streams) is where a fake would
-  differ. Each test gets a random `AGENTSPACE_REDIS_PREFIX` and deletes its keys
+  The behavior we rely on (blocking `XREAD` across connections, exact and
+  approximate trimming, `EXPIRE` on streams) is where a fake would differ. Each test gets a random `AGENTSPACE_REDIS_PREFIX` and deletes its keys
   after. The multi-server tests run two `RunManager`s with different owner ids
   on one Redis and one database: prompt on A, watch, steer and abort through B.
   Kill A's heartbeat, and B sweeps the run as `interrupted`.
@@ -291,6 +300,8 @@ The setting, the error codes and the UI stay as ADR-026 has them.
 - Steer/follow-up sent just as the run ends now get a 202 and come back through
   `onUnsent`, not a 409. The UX is the same, because the client already handles
   both.
+- Each open SSE stream holds one Redis connection while it waits (ElastiCache
+  allows tens of thousands). A shared reader per session per task can come later.
 - Each event is one extra hop (owner → Redis → reader), a millisecond or two
   inside one AWS region.
 - `runs` rows accumulate (one per prompt); add retention later if they ever

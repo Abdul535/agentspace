@@ -1,8 +1,11 @@
 import itertools
+import os
+import secrets
 from collections.abc import Iterator
 
 import pg
 import pytest
+import redis
 
 from agentspace.ai.catalog import ModelInfo, OpenRouterCatalog
 from agentspace.encryption import SecretBox
@@ -52,3 +55,29 @@ def database_url(template_database: tuple[str, Iterator[int]], monkeypatch: pyte
     monkeypatch.setenv("AGENTSPACE_DATABASE_URL", url)
     yield url
     pg.drop_database(name)
+
+
+REDIS_URL = os.environ.get("AGENTSPACE_TEST_REDIS_URL", "redis://127.0.0.1:55379/0")
+"""The Redis tests use (ADR-029): the local one from `scripts/db.sh`, or CI's Redis service."""
+
+
+@pytest.fixture(scope="session")
+def redis_server() -> str:
+    """The test Redis's URL, once it answers; the run stops with how to start it if it doesn't."""
+    try:
+        redis.Redis.from_url(REDIS_URL).ping()
+    except redis.ConnectionError as error:
+        pytest.exit(f"No Redis at {REDIS_URL} ({error}). Start it with `bash scripts/db.sh --server`.", 1)
+    return REDIS_URL
+
+
+@pytest.fixture(autouse=True)
+def redis_prefix(redis_server: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """This test's own Redis keys, which the app's Settings read; deleted after the test."""
+    prefix = f"agentspace_test:{secrets.token_hex(4)}:"
+    monkeypatch.setenv("AGENTSPACE_REDIS_URL", redis_server)
+    monkeypatch.setenv("AGENTSPACE_REDIS_PREFIX", prefix)
+    yield prefix
+    client = redis.Redis.from_url(redis_server)
+    if keys := list(client.scan_iter(f"{prefix}*")):
+        client.delete(*keys)

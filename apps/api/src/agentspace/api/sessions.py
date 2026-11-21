@@ -36,9 +36,10 @@ from agentspace.api.deps import CatalogDep, DBDep, Run, RunDep, RunsDep, Session
 from agentspace.api.mcp_servers import McpDep, McpServerConfigsDep
 from agentspace.config import Settings
 from agentspace.mcp.manager import McpManager, ServerConfig
-from agentspace.runs import ActiveRun, QueueKind, RunManager, RunSnapshot, Subscriber, read_events
+from agentspace.runs import QueueKind, RunManager, RunSnapshot
 from agentspace.session.db import release
 from agentspace.session.models import SessionRow
+from agentspace.session.store import SessionStore
 from agentspace.tools import TOOL_SETS, ToolSetName, allows_mcp, build_tools
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])  # TS: a sub-router, like `new Hono().basePath("/sessions")`
@@ -90,11 +91,16 @@ class SessionUpdate(BaseModel):
     thinking_level: ThinkingLevel | None = None
 
 
-def public(session: SessionRow, runs: RunManager) -> SessionPublic:
-    """The session as the API returns it, with whether it is running right now."""
+def public(session: SessionRow, running: bool) -> SessionPublic:
+    """The session as the API returns it, with whether it is running right now (on any server)."""
     out = SessionPublic.model_validate(session, from_attributes=True)
-    out.running = runs.is_running(session.id)
+    out.running = running
     return out
+
+
+async def is_running(runs: RunManager, store: SessionStore, session_id: str) -> bool:
+    """Whether the session has a run going, on whichever server drives it (ADR-029)."""
+    return await runs.active(store.db, session_id) is not None
 
 
 class PromptCreate(BaseModel):
@@ -143,7 +149,7 @@ async def prompt_message(body: MessageCreate) -> UserMessage:
 # TS: the decorator registers the handler, like router.post("/", handler). The parameter and return types
 # become the validated request body and response schema (and the OpenAPI spec).
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_session(body: SessionCreate, store: StoreDep, settings: SettingsDep, runs: RunsDep) -> SessionPublic:
+async def create_session(body: SessionCreate, store: StoreDep, settings: SettingsDep) -> SessionPublic:
     """Create a session; the provider must be registered."""
     provider = body.provider or settings.default_provider
     if provider not in PROVIDERS:
@@ -159,14 +165,15 @@ async def create_session(body: SessionCreate, store: StoreDep, settings: Setting
         thinking_level=body.thinking_level or "off",
         title=body.title,
     )
-    return public(session, runs)
+    return public(session, running=False)
 
 
 @router.get("")
 async def list_sessions(store: StoreDep, runs: RunsDep) -> list[SessionPublic]:
     """All sessions, most recently active first."""
-    # TS: (await store.listAll()).map((s) => public(s, runs))
-    return [public(s, runs) for s in await store.list_all()]
+    running = await runs.running_sessions(store.db, store.user_id)
+    # TS: (await store.listAll()).map((s) => public(s, running.has(s.id)))
+    return [public(s, s.id in running) for s in await store.list_all()]
 
 
 @router.get("/{session_id}")
@@ -174,9 +181,8 @@ async def get_session(session: SessionRowDep, store: StoreDep, runs: RunsDep) ->
     """One session and its saved transcript; while it runs, `GET .../events` also has the reply in progress."""
     # TS: `**dict` spreads keyword arguments: new SessionDetail({ ...public, messages }).
     messages = await store.messages(session.id)
-    return SessionDetail(
-        **public(session, runs).model_dump(), messages=messages, can_continue=can_continue(build_context(messages))
-    )
+    out = public(session, await is_running(runs, store, session.id))
+    return SessionDetail(**out.model_dump(), messages=messages, can_continue=can_continue(build_context(messages)))
 
 
 @router.patch("/{session_id}")
@@ -187,7 +193,7 @@ async def update_session(body: SessionUpdate, session: SessionRowDep, store: Sto
     """
     # A run reads these once when it starts, so a switch mid-run would look applied but wasn't.
     # It also keeps the notice from landing between a tool call and its result.
-    if runs.is_running(session.id):
+    if await is_running(runs, store, session.id):
         raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the current run to finish before switching.")
     if body.model is not None and body.model != (previous := session.model):
         await store.set_model(session, body.model)
@@ -195,14 +201,14 @@ async def update_session(body: SessionUpdate, session: SessionRowDep, store: Sto
     if body.thinking_level is not None and body.thinking_level != (previous := session.thinking_level):
         await store.set_thinking_level(session, body.thinking_level)
         await store.append(session, NoticeMessage(text=f"Switched thinking from {previous} to {body.thinking_level}"))
-    return public(session, runs)
+    return public(session, running=False)
 
 
 @router.post("/{session_id}/archive", status_code=status.HTTP_204_NO_CONTENT)
 async def archive_session(session: SessionRowDep, store: StoreDep, runs: RunsDep) -> None:
     """Hide the session from the list; its transcript is kept. 409 while a run is in progress."""
     # A run hidden from the sidebar would keep working where nobody can see or stop it.
-    if runs.is_running(session.id):
+    if await is_running(runs, store, session.id):
         raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the current run to finish before archiving.")
     await store.archive(session)
 
@@ -243,8 +249,8 @@ async def send_message(
     """Start a run on a new user message and stream its events as SSE.
 
     Each SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.
-    Its `id` numbers the event in the run (ADR-028): send the last one as `Last-Event-ID`
-    to `GET .../events` after a dropped connection to get only what was missed.
+    Its `id` is the event's entry in the session's Redis Stream (ADR-029): send the last one
+    as `Last-Event-ID` to `GET .../events` after a dropped connection to get only what was missed.
     The server owns the run (ADR-007): closing this stream only stops listening.
     Reattach with `GET .../events`; stop the run with `POST .../abort`.
     """
@@ -334,15 +340,15 @@ async def compact_session(
         await emit(AgentEndEvent(reason="done" if saved else "error", new_messages=new))
 
     await release(db)
-    queue = runs.start(run.active, loop)
-    async for event in stream(run.active, queue):
+    runs.start(run.active, loop)
+    async for event in stream(runs, run.active.session_id, run.active.run_id, run.active.start_id):
         yield event
 
 
-async def stream(active: ActiveRun, queue: Subscriber) -> AsyncIterator[ServerSentEvent]:
-    """A subscriber's events as SSE, each with its id so the client can resume after it (ADR-028)."""
-    async for numbered in read_events(active, queue):
-        yield ServerSentEvent(data=numbered.event, id=active.event_id(numbered.seq))
+async def stream(runs: RunManager, session_id: str, run_id: str, after: str) -> AsyncIterator[ServerSentEvent]:
+    """The run's events after Stream entry `after` as SSE, each with its id so the client can resume after it."""
+    async for entry in runs.follow(session_id, run_id, after):
+        yield ServerSentEvent(data=entry.event, id=entry.id)
 
 
 # Looks up the session model in the catalog when the run needs it; None when the catalog doesn't know it.
@@ -464,9 +470,9 @@ async def stream_run(
         if await over_threshold():
             await compact_now(emit, "threshold")
 
-    queue = runs.start(run.active, loop)
+    runs.start(run.active, loop)
     # TS: each `yield` sends one SSE event to the client the moment it happens.
-    async for event in stream(run.active, queue):
+    async for event in stream(runs, run.active.session_id, run.active.run_id, run.active.start_id):
         yield event
 
 
@@ -482,36 +488,39 @@ async def watch_session(
     runs: RunsDep,
     last_event_id: Annotated[str | None, Header()] = None,
 ) -> AsyncIterable[ServerSentEvent]:
-    """Attach to the session's run: a `run_snapshot` first, then live events until the run ends.
+    """Attach to the session's run, on whichever server drives it: a `run_snapshot`, then live events until it ends.
 
-    With `Last-Event-ID` from this run (ADR-028), the stream skips the snapshot and sends
-    only the events after that id. If they can't be replayed (another run, or too old),
-    it falls back to a snapshot. With no run in progress, the stream is one snapshot of
-    the saved transcript.
+    With `Last-Event-ID` (ADR-028), the stream skips the snapshot and sends only the events
+    after that id, also when the run has ended since: then they finish with its `agent_end`,
+    so a client cut off by a server that stopped still learns why. If they can't be replayed
+    (another run, or too old), it falls back to a snapshot. With no run in progress, the
+    stream is one snapshot of the saved transcript.
     """
-    active = runs.get(session.id)
-    if active is None:
-        yield ServerSentEvent(data=RunSnapshot(running=False, messages=await store.messages(session.id)))
+    row = await runs.active(store.db, session.id)
+    # TS: `:=` assigns inside the condition, like `if (last && (resumed = await runOf(last)))`.
+    if last_event_id and (resumed := await runs.log.run_of(session.id, last_event_id)):
+        # A newer run cleared the Stream, so an entry still in it is from this run or the one just ended.
+        if row is None or row.id == resumed:
+            await release(store.db)
+            async for event in stream(runs, session.id, resumed, last_event_id):
+                yield event
+            return
+    if row is not None and (built := await runs.snapshot(session.id, row.id, lambda: store.messages(session.id))):
+        snapshot, after = built
+        # The snapshot covers every entry up to `after`, so resuming after it starts at the next one.
+        yield ServerSentEvent(data=snapshot, id=after)
+        # The stream can last the whole run; its connection serves other requests meanwhile (ADR-027).
+        await release(store.db)
+        async for event in stream(runs, session.id, row.id, after):
+            yield event
         return
-    await release(store.db)
-    resumed = active.resume(last_event_id) if last_event_id else None
-    if resumed:
-        missed, queue = resumed
-        for numbered in missed:
-            yield ServerSentEvent(data=numbered.event, id=active.event_id(numbered.seq))
-    else:
-        # Snapshot and subscribe with no `await` between them, so no event can fall in the gap.
-        snapshot, queue = active.snapshot(), active.subscribe()
-        # The snapshot holds every event up to `seq`, so resuming after it starts at the next one.
-        yield ServerSentEvent(data=snapshot, id=active.event_id(active.seq))
-    async for event in stream(active, queue):
-        yield event
+    # Nothing running, or it ended while we looked: the saved transcript is the whole story.
+    yield ServerSentEvent(data=RunSnapshot(running=False, messages=await store.messages(session.id)))
 
 
-def queue_message(session: SessionRow, runs: RunManager, kind: QueueKind, content: str) -> None:
-    """Queue a user message on the session's run, or 409 if no run will pick it up."""
-    active = runs.get(session.id)
-    if active is None or not active.queue(kind, UserMessage(content=content)):
+async def queue_message(session: SessionRow, runs: RunManager, kind: QueueKind, content: str) -> None:
+    """Queue a user message on the session's run, wherever it runs, or 409 if nothing is running."""
+    if not await runs.send(session.id, kind, content):
         raise HTTPException(
             status.HTTP_409_CONFLICT, "This session has no run that can take it; send it as a new prompt."
         )
@@ -519,18 +528,32 @@ def queue_message(session: SessionRow, runs: RunManager, kind: QueueKind, conten
 
 @router.post("/{session_id}/steer", status_code=status.HTTP_202_ACCEPTED)
 async def steer_run(body: PromptCreate, session: SessionRowDep, runs: RunsDep) -> None:
-    """Queue a message for the model to see after the current turn; it shows up as a `message_end` when it does."""
-    queue_message(session, runs, "steer", body.content)
+    """Queue a message for the model to see after the current turn; it shows up as a `message_end` when it does.
+
+    A run that is already ending drops it: the client gets back what the run never picked up.
+    """
+    await queue_message(session, runs, "steer", body.content)
 
 
 @router.post("/{session_id}/follow-up", status_code=status.HTTP_202_ACCEPTED)
 async def follow_up_run(body: PromptCreate, session: SessionRowDep, runs: RunsDep) -> None:
     """Queue a message for when the run would otherwise stop; the run then goes on with it."""
-    queue_message(session, runs, "follow_up", body.content)
+    await queue_message(session, runs, "follow_up", body.content)
 
 
-@router.post("/{session_id}/abort", status_code=status.HTTP_204_NO_CONTENT)
-async def abort_run(session: SessionRowDep, runs: RunsDep) -> None:
-    """Stop the session's run; finished messages are kept. 409 if nothing is running."""
-    if not await runs.abort(session.id):
-        raise HTTPException(status.HTTP_409_CONFLICT, "This session has no run in progress.")
+@router.post(
+    "/{session_id}/abort",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={202: {"description": "The stop is on its way; the run's stream ends when it lands."}},
+)
+async def abort_run(session: SessionRowDep, runs: RunsDep, response: Response) -> None:
+    """Stop the session's run; finished messages are kept. 409 if nothing is running.
+
+    204 once it has stopped; 202 if the server driving it hasn't confirmed within a few seconds (ADR-029).
+    """
+    # TS: `match` is a switch that compares values here: `case None` is `case null`.
+    match await runs.abort(session.id):
+        case None:
+            raise HTTPException(status.HTTP_409_CONFLICT, "This session has no run in progress.")
+        case "stopping":
+            response.status_code = status.HTTP_202_ACCEPTED

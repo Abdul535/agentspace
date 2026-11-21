@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Starts the local Supabase Postgres if needed and checks this checkout's database (ADR-027).
+# Starts the local Supabase Postgres and Redis if needed and checks this checkout's database (ADR-027, ADR-029).
 # Every checkout shares the `postgres` database unless it opted out with --own.
 # `pnpm dev:api` and scripts/worktree-setup.sh run it; it is safe to run again by hand.
 # Usage: scripts/db.sh            server + this checkout's database (from AGENTSPACE_DATABASE_URL)
@@ -31,6 +31,22 @@ fi
 # `supabase start` returns once the container runs; Postgres may still be opening.
 for _ in $(seq 1 30); do
   docker exec "$container" pg_isready -U postgres -q && break
+  sleep 1
+done
+
+# Redis holds run events and stop/steer requests, so several API servers can share runs (ADR-029).
+# One container for every checkout, like Postgres: session ids are UUIDs, so keys never collide.
+redis_container=agentspace_redis
+case "$(docker inspect -f '{{.State.Running}}' "$redis_container" 2>/dev/null)" in
+  true) ;;
+  false) docker start "$redis_container" >/dev/null ;;
+  *)
+    echo "Starting the local Redis (the first time pulls its image)..."
+    docker run -d --name "$redis_container" --restart unless-stopped -p 127.0.0.1:55379:6379 redis:8.2-alpine >/dev/null
+    ;;
+esac
+for _ in $(seq 1 30); do
+  [ "$(docker exec "$redis_container" redis-cli ping 2>/dev/null)" = "PONG" ] && break
   sleep 1
 done
 

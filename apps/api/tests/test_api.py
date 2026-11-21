@@ -1,10 +1,9 @@
 import json
 from collections.abc import Iterator
 from pathlib import Path
-from typing import cast
 
+import pg
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentspace.ai.messages import ToolCall
@@ -12,7 +11,6 @@ from agentspace.ai.providers.fake import FakeProvider, text_reply, tool_reply
 from agentspace.api.deps import provider_lookup
 from agentspace.config import Settings
 from agentspace.main import create_app
-from agentspace.runs import ActiveRun
 
 
 @pytest.fixture
@@ -39,13 +37,6 @@ def sse_events(text: str) -> list[dict]:
     ]
 
 
-def mark_running(client: TestClient, session_id: str) -> None:
-    """Make the session look busy, as if a run had claimed it."""
-    # TS: cast() is `as FastAPI`: TestClient types `app` as any ASGI app, ours is a FastAPI one.
-    runs = cast(FastAPI, client.app).state.runs
-    runs.runs[session_id] = ActiveRun(session_id=session_id, messages=[], history_size=0)
-
-
 def test_create_list_and_get_session(client: TestClient) -> None:
     created = client.post("/sessions", json={"model": "some/model"})
     assert created.status_code == 201
@@ -61,9 +52,9 @@ def test_archiving_hides_a_session_but_not_while_it_runs(client: TestClient) -> 
     kept, archived = (client.post("/sessions", json={}).json()["id"] for _ in range(2))
     assert client.post("/sessions/nope/archive").status_code == 404
 
-    mark_running(client, archived)
+    run_id = pg.mark_running(archived)
     assert client.post(f"/sessions/{archived}/archive").status_code == 409
-    del cast(FastAPI, client.app).state.runs.runs[archived]
+    pg.mark_done(run_id)
 
     assert client.post(f"/sessions/{archived}/archive").status_code == 204
     assert [s["id"] for s in client.get("/sessions").json()] == [kept]
@@ -109,7 +100,7 @@ def test_send_message_streams_events_and_persists_the_transcript(
 
 def test_a_running_session_refuses_a_second_prompt(client: TestClient) -> None:
     session_id = client.post("/sessions", json={}).json()["id"]
-    mark_running(client, session_id)
+    pg.mark_running(session_id)
     assert client.post(f"/sessions/{session_id}/messages", json={"content": "hi"}).status_code == 409
     assert client.get(f"/sessions/{session_id}").json()["running"] is True
 
@@ -156,7 +147,7 @@ def test_switching_model_is_refused_mid_run_and_validated(client: TestClient) ->
     assert client.patch(f"/sessions/{session_id}", json={"model": ""}).status_code == 422
     assert client.patch("/sessions/nope", json={"model": "a/b"}).status_code == 404
 
-    mark_running(client, session_id)
+    pg.mark_running(session_id)
     assert client.patch(f"/sessions/{session_id}", json={"model": "a/b"}).status_code == 409
 
 

@@ -38,7 +38,9 @@ The browser only ever talks to the Next.js origin: `/api/*` is rewritten to the 
 `next.config.ts` (set `API_URL` if the backend isn't on `127.0.0.1:8000`), so there is no CORS
 to configure. Migrations run when the API starts. The database is Postgres: `pnpm dev:api` starts
 local Supabase in Docker (so Docker must be running; install the CLI with `brew install supabase/tap/supabase`)
-and checks the shared dev database (ADR-027; a branch that adds a migration runs `pnpm db:own` first). The per-session workspaces live in `data/` (gitignored).
+and checks the shared dev database (ADR-027; a branch that adds a migration runs `pnpm db:own` first). It also starts a
+Redis container (`agentspace_redis` on port 55379), which carries run events and stop/steer requests between API servers
+(ADR-029). The per-session workspaces live in `data/` (gitignored).
 
 ## How it works
 
@@ -59,9 +61,12 @@ prompt ──> agent loop ──> provider (OpenRouter) ──> model
 - **`api/`** — `POST /sessions`, `GET /sessions`, `GET /sessions/{id}`, and
   `POST /sessions/{id}/messages`, which streams the run's events as SSE. One run per session
   at a time.
+- **`runs.py`, `run_log.py`** — background runs that any API server can watch, steer or stop: a `runs`
+  row in Postgres names the server driving each run, and the events go through a Redis Stream per
+  session (ADR-007, ADR-029).
 
 The web app reads that SSE stream over `fetch` (`EventSource` can't POST) and renders the
-streaming text and tool calls live; closing the tab aborts the request, which cancels the run.
+streaming text and tool calls live; closing the tab only stops listening, and the run goes on.
 Everything already finished is saved.
 
 Full reasoning and trade-offs are in the ADRs: [`ADR-001`](.agents/adr/ADR-001-minimal-agent-core.md)
@@ -71,7 +76,7 @@ Full reasoning and trade-offs are in the ADRs: [`ADR-001`](.agents/adr/ADR-001-m
 
 Set in the environment or `apps/api/.env`: `OPENROUTER_API_KEY`, `AGENTSPACE_DEFAULT_MODEL`
 (default `anthropic/claude-sonnet-5.5`), `AGENTSPACE_DEFAULT_PROVIDER`, `AGENTSPACE_DATA_DIR`,
-`AGENTSPACE_DATABASE_URL`, `AGENTSPACE_MAX_TURNS`, `AGENTSPACE_MAX_OUTPUT_TOKENS`, `AGENTSPACE_ENABLE_BASH`
+`AGENTSPACE_DATABASE_URL`, `AGENTSPACE_REDIS_URL` (default the local one on port 55379), `AGENTSPACE_MAX_TURNS`, `AGENTSPACE_MAX_OUTPUT_TOKENS`, `AGENTSPACE_ENABLE_BASH`
 (default `false`: the `bash` tool runs commands unsandboxed as your user), `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (both set turns on a Langfuse trace per run, ADR-018;
 `LANGFUSE_BASE_URL` defaults to the EU cloud, `https://us.cloud.langfuse.com` for the US one). See
 [`config.py`](apps/api/src/agentspace/config.py).
