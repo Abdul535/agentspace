@@ -152,7 +152,7 @@ function FormBody({
           onChange={(e) => setEnv(e.target.value)}
           placeholder="GITHUB_TOKEN=…"
         />
-        <p className="text-xs text-muted-foreground">Stored as plain text. The server gets these plus PATH and HOME.</p>
+        <p className="text-xs text-muted-foreground">Encrypted in the database and visible only to you. The server gets these plus PATH and HOME.</p>
       </div>
       {shown && <p className="text-sm text-pretty text-destructive">{shown}</p>}
       <DialogFooter>

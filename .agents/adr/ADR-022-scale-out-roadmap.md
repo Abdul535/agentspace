@@ -72,7 +72,7 @@ After A the app can be public, on one Fargate task, with `bash` and stdio MCP
     sends its token, and a FastAPI dependency checks the JWT on every route
     except health. Add a Host/Origin allowlist and CORS. Designed sign-in,
     signed-out and expired states in the UI.
-56. [ ] **Users own their data (ADR).** A `users` table keyed by the provider's
+56. [x] **Users own their data (ADR-025).** A `users` table keyed by the provider's
     user id. `user_id` goes on sessions and MCP servers, and every query filters
     by it: another user's session is a 404, never a 403, so its existence leaks
     nothing. Decide whether skills are global read-only or per user. Encrypt

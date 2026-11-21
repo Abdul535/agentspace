@@ -334,13 +334,13 @@ export interface paths {
         };
         /**
          * List Servers
-         * @description Every saved server, by name.
+         * @description The caller's saved servers, by name.
          */
         get: operations["list_servers_mcp_servers_get"];
         put?: never;
         /**
          * Create Server
-         * @description Save a server; 409 if its name is taken. Sessions pick it up on their next message.
+         * @description Save a server for the caller; 409 if they have one by that name. Their sessions pick it up next message.
          */
         post: operations["create_server_mcp_servers_post"];
         delete?: never;

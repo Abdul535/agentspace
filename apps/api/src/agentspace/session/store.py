@@ -14,10 +14,15 @@ message_adapter: TypeAdapter[AgentMessage] = TypeAdapter(AgentMessage)
 
 
 class SessionStore:
-    """Reads and writes sessions and their transcripts. Every write commits."""
+    """Reads and writes one user's sessions and their transcripts. Every write commits.
 
-    def __init__(self, db: AsyncSession) -> None:
+    Scoped to the user it was made for (ADR-025): it only finds, lists and creates
+    that user's sessions, so a route can't forget the owner check.
+    """
+
+    def __init__(self, db: AsyncSession, user_id: str) -> None:
         self.db = db
+        self.user_id = user_id
 
     async def create(
         self,
@@ -31,6 +36,7 @@ class SessionStore:
     ) -> SessionRow:
         """Create and save a new, empty session."""
         row = SessionRow(
+            user_id=self.user_id,
             provider=provider,
             model=model,
             system_prompt=system_prompt,
@@ -43,14 +49,19 @@ class SessionStore:
         return row
 
     async def get(self, session_id: str) -> SessionRow | None:
-        """The session with this id, or None."""
-        return await self.db.get(SessionRow, session_id)
+        """The user's session with this id, or None, whether it doesn't exist or is someone else's."""
+        result = await self.db.exec(
+            select(SessionRow).where(SessionRow.id == session_id, SessionRow.user_id == self.user_id)
+        )
+        return result.first()
 
     async def list_all(self) -> list[SessionRow]:
-        """Every session not archived, most recently active first."""
+        """The user's sessions not archived, most recently active first."""
         # TS: a query builder, like Drizzle's db.select().from(sessions).where(isNull(...)).orderBy(desc(...)).
         result = await self.db.exec(
-            select(SessionRow).where(col(SessionRow.archived_at).is_(None)).order_by(col(SessionRow.updated_at).desc())
+            select(SessionRow)
+            .where(SessionRow.user_id == self.user_id, col(SessionRow.archived_at).is_(None))
+            .order_by(col(SessionRow.updated_at).desc())
         )
         return list(result.all())
 
@@ -83,7 +94,7 @@ class SessionStore:
         return session
 
     async def messages(self, session_id: str) -> list[AgentMessage]:
-        """A session's transcript, oldest message first."""
+        """A session's transcript, oldest message first; only called with the id of a session `get` found."""
         result = await self.db.exec(
             select(MessageRow).where(MessageRow.session_id == session_id).order_by(col(MessageRow.seq))
         )

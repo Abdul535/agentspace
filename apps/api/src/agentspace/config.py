@@ -57,6 +57,9 @@ class Settings(BaseSettings):
     supabase_url: str | None = None
     """The Supabase project (`https://<ref>.supabase.co`) whose sign-in tokens the API accepts (ADR-024).
     Unset = local mode: no login, anyone who reaches the API can use it."""
+    secret_key: str | None = Field(default=None, min_length=32)
+    """Encrypts users' MCP env values in the database (ADR-025); make one with `openssl rand -base64 32`.
+    Unset = one is generated into `<data_dir>/secret.key`, next to the database it protects (fine locally only)."""
     auto_migrate: bool = True
     """Apply pending Alembic migrations when the app starts."""
 

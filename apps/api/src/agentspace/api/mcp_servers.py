@@ -1,4 +1,7 @@
-"""HTTP routes for the MCP servers on the settings page: list, add, change, delete and test (ADR-017)."""
+"""HTTP routes for the MCP servers on the settings page: list, add, change, delete and test (ADR-017).
+
+Each user has their own servers, and their env values are encrypted in the database (ADR-025).
+"""
 
 import asyncio
 import secrets
@@ -8,12 +11,14 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+from sqlalchemy import ColumnElement
 from sqlmodel import col, select
 
-from agentspace.api.deps import DBDep, SettingsDep
+from agentspace.api.deps import DBDep, SecretBoxDep, SettingsDep, UserDep
+from agentspace.encryption import SecretBox, SecretError
 from agentspace.mcp.client import McpError, StdioClient
 from agentspace.mcp.manager import McpManager, ServerConfig
-from agentspace.session.models import McpServerRow, utcnow
+from agentspace.session.models import McpServerRow, UserRow, utcnow
 
 router = APIRouter(prefix="/mcp-servers", tags=["mcp"])
 
@@ -111,31 +116,54 @@ class McpServerTest(BaseModel):
     tools: list[McpToolSummary] = []
 
 
-def server_config(row: McpServerRow) -> ServerConfig:
+def plain_env(row: McpServerRow, box: SecretBox) -> dict[str, str]:
+    """The row's env values decrypted, or a 500 that says why they can't be."""
+    try:
+        return box.decrypt_dict(row.user_id, row.env)
+    except SecretError as exc:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"MCP server '{row.name}': {exc}") from exc
+
+
+def public(row: McpServerRow, box: SecretBox) -> McpServerPublic:
+    """The server as the API returns it, to its owner only, with its env readable for the edit form."""
+    # TS: `a | b` on dicts is `{ ...a, ...b }`: the row's fields with `env` swapped for the readable one.
+    return McpServerPublic.model_validate(row.model_dump() | {"env": plain_env(row, box)})
+
+
+def server_config(row: McpServerRow, box: SecretBox) -> ServerConfig:
     """The row as what the manager needs to start it."""
     return ServerConfig(
         id=row.id,
         name=row.name,
         command=row.command,
         args=tuple(row.args),
-        env=tuple(sorted(row.env.items())),
+        env=tuple(sorted(plain_env(row, box).items())),
     )
 
 
-async def enabled_server_configs(db: DBDep, settings: SettingsDep) -> list[ServerConfig]:
-    """The servers every run connects to: the enabled ones, or none while MCP is off."""
+def owned_by(user: UserRow) -> ColumnElement[bool]:
+    """The filter every query here uses: only the caller's servers."""
+    return col(McpServerRow.user_id) == user.id
+
+
+async def enabled_server_configs(
+    db: DBDep, settings: SettingsDep, user: UserDep, box: SecretBoxDep
+) -> list[ServerConfig]:
+    """The servers the caller's runs connect to: their enabled ones, or none while MCP is off."""
     if not settings.enable_mcp:
         return []
-    rows = await db.exec(select(McpServerRow).where(col(McpServerRow.enabled)).order_by(col(McpServerRow.name)))
-    return [server_config(row) for row in rows]
+    rows = await db.exec(
+        select(McpServerRow).where(owned_by(user), col(McpServerRow.enabled)).order_by(col(McpServerRow.name))
+    )
+    return [server_config(row, box) for row in rows]
 
 
 McpServerConfigsDep = Annotated[list[ServerConfig], Depends(enabled_server_configs)]
 
 
-async def get_server_row(server_id: str, db: DBDep) -> McpServerRow:
-    """The server named in the path, or a 404."""
-    row = await db.get(McpServerRow, server_id)
+async def get_server_row(server_id: str, db: DBDep, user: UserDep) -> McpServerRow:
+    """The caller's server named in the path, or a 404, also when it is someone else's."""
+    row = (await db.exec(select(McpServerRow).where(McpServerRow.id == server_id, owned_by(user)))).first()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"MCP server {server_id} not found.")
     return row
@@ -144,49 +172,57 @@ async def get_server_row(server_id: str, db: DBDep) -> McpServerRow:
 ServerRowDep = Annotated[McpServerRow, Depends(get_server_row)]
 
 
-async def check_name_free(db: DBDep, name: str, except_id: str | None = None) -> None:
-    """409 if another server has this name, counting `-` and `_` as the same (their tool names would clash)."""
+async def check_name_free(db: DBDep, user: UserDep, name: str, except_id: str | None = None) -> None:
+    """409 if another of the caller's servers has this name, counting `-` and `_` as the same (tool names clash)."""
     key = name.replace("-", "_")
-    for row in await db.exec(select(McpServerRow)):
+    for row in await db.exec(select(McpServerRow).where(owned_by(user))):
         if row.id != except_id and row.name.replace("-", "_") == key:
             raise HTTPException(status.HTTP_409_CONFLICT, f"An MCP server named '{row.name}' already exists.")
 
 
 @router.get("")
-async def list_servers(db: DBDep, settings: SettingsDep) -> McpServerList:
-    """Every saved server, by name."""
-    rows = await db.exec(select(McpServerRow).order_by(col(McpServerRow.name)))
-    servers = [McpServerPublic.model_validate(row, from_attributes=True) for row in rows]
+async def list_servers(db: DBDep, settings: SettingsDep, user: UserDep, box: SecretBoxDep) -> McpServerList:
+    """The caller's saved servers, by name."""
+    rows = await db.exec(select(McpServerRow).where(owned_by(user)).order_by(col(McpServerRow.name)))
+    servers = [public(row, box) for row in rows]
     return McpServerList(
         mcp_enabled=settings.enable_mcp, admin_token_set=bool(settings.mcp_admin_token), servers=servers
     )
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, dependencies=AdminOnly)
-async def create_server(body: McpServerCreate, db: DBDep) -> McpServerPublic:
-    """Save a server; 409 if its name is taken. Sessions pick it up on their next message."""
-    await check_name_free(db, body.name)
-    # TS: `**body.model_dump()` spreads the fields as keyword arguments, like new Row({ ...body }).
-    row = McpServerRow(**body.model_dump())
+async def create_server(body: McpServerCreate, db: DBDep, user: UserDep, box: SecretBoxDep) -> McpServerPublic:
+    """Save a server for the caller; 409 if they have one by that name. Their sessions pick it up next message."""
+    await check_name_free(db, user, body.name)
+    row = McpServerRow(
+        user_id=user.id,
+        name=body.name,
+        command=body.command,
+        args=body.args,
+        env=box.encrypt_dict(user.id, body.env),
+        enabled=body.enabled,
+    )
     db.add(row)
     await db.commit()
-    return McpServerPublic.model_validate(row, from_attributes=True)
+    return public(row, box)
 
 
 @router.patch("/{server_id}", dependencies=AdminOnly)
-async def update_server(body: McpServerUpdate, row: ServerRowDep, db: DBDep, mcp: McpDep) -> McpServerPublic:
+async def update_server(
+    body: McpServerUpdate, row: ServerRowDep, db: DBDep, user: UserDep, box: SecretBoxDep, mcp: McpDep
+) -> McpServerPublic:
     """Change a server; its running processes stop now and start again with the new settings when next needed."""
     if body.name is not None:
-        await check_name_free(db, body.name, except_id=row.id)
+        await check_name_free(db, user, body.name, except_id=row.id)
     # exclude_unset: only the fields the client sent, so a missing field never resets one.
     for key, value in body.model_dump(exclude_unset=True).items():
         if value is not None:
-            setattr(row, key, value)  # TS: row[key] = value
+            setattr(row, key, box.encrypt_dict(user.id, value) if key == "env" else value)  # TS: row[key] = value
     row.updated_at = utcnow()
     db.add(row)
     await db.commit()
     await mcp.close_server(row.id)
-    return McpServerPublic.model_validate(row, from_attributes=True)
+    return public(row, box)
 
 
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=AdminOnly)
@@ -198,7 +234,7 @@ async def delete_server(row: ServerRowDep, db: DBDep, mcp: McpDep) -> None:
 
 
 @router.post("/{server_id}/test", dependencies=AdminOnly)
-async def test_server(row: ServerRowDep, settings: SettingsDep) -> McpServerTest:
+async def test_server(row: ServerRowDep, settings: SettingsDep, box: SecretBoxDep) -> McpServerTest:
     """Start the server once, list its tools and stop it. A failure is a result with `ok: false`, not an HTTP error.
 
     403 while MCP is off, since this runs the server's command on the host.
@@ -207,7 +243,7 @@ async def test_server(row: ServerRowDep, settings: SettingsDep) -> McpServerTest
         raise HTTPException(status.HTTP_403_FORBIDDEN, "MCP is off. Set AGENTSPACE_ENABLE_MCP=true to start servers.")
     cwd = settings.data_dir / "mcp-test"
     cwd.mkdir(parents=True, exist_ok=True)
-    client = StdioClient(row.command, row.args, row.env, cwd)
+    client = StdioClient(row.command, row.args, plain_env(row, box), cwd)
     try:
         async with asyncio.timeout(TEST_TIMEOUT_S):
             await client.start()

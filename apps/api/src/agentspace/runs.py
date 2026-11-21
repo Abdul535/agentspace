@@ -34,6 +34,7 @@ from agentspace.agent.loop import Emit
 from agentspace.agent.messages import AgentMessage
 from agentspace.ai.messages import AssistantMessage, TextContent, ThinkingContent, UserMessage
 from agentspace.ai.provider import TextDeltaEvent, ThinkingDeltaEvent, ToolCallEndEvent
+from agentspace.session.models import SessionRow
 from agentspace.session.store import SessionStore
 from agentspace.tracing import RunTrace, Tracer
 
@@ -266,10 +267,11 @@ class RunManager:
         """Run the loop with an `emit` that saves finished messages, tracks state and fans events out."""
         # The run outlives the request, so it can't use the request's DB session: it opens its own.
         async with self.db_factory() as db:
-            store = SessionStore(db)
-            session = await store.get(run.session_id)
+            # By id alone: the route that claimed the run already checked who owns the session.
+            session = await db.get(SessionRow, run.session_id)
             if session is None:
                 raise LookupError(f"Session {run.session_id} disappeared before its run started.")
+            store = SessionStore(db, session.user_id)
 
             async def emit(event: AgentEvent) -> None:
                 """Save, update snapshot and trace, then publish: a client never sees a message that isn't saved."""

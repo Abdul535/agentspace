@@ -48,7 +48,7 @@ export function McpServers() {
         <div className="flex flex-col gap-1">
           <h1 className="text-xl font-semibold tracking-tight text-balance">MCP servers</h1>
           <p className="text-sm text-pretty text-muted-foreground">
-            Programs that give the agent more tools. Every enabled server joins every session&apos;s next message.
+            Programs that give the agent more tools. Each enabled server joins your sessions on their next message.
           </p>
         </div>
         <Button onClick={() => openForm(null)}>
