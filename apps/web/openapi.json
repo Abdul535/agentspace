@@ -165,6 +165,42 @@
         }
       }
     },
+    "/sessions/{session_id}/archive": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "Archive Session",
+        "description": "Hide the session from the list; its transcript is kept. 409 while a run is in progress.",
+        "operationId": "archive_session_sessions__session_id__archive_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions/{session_id}/messages": {
       "post": {
         "tags": [

@@ -41,6 +41,8 @@ class SessionRow(SQLModel, table=True):
     """How hard the model thinks on this session's runs (ADR-012)."""
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+    archived_at: datetime | None = None
+    """When the session was archived; archived sessions are left out of the list."""
 
 
 class MessageRow(SQLModel, table=True):

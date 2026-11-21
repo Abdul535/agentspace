@@ -47,9 +47,11 @@ class SessionStore:
         return await self.db.get(SessionRow, session_id)
 
     async def list_all(self) -> list[SessionRow]:
-        """Every session, most recently active first."""
-        # TS: a query builder, like Drizzle's db.select().from(sessions).orderBy(desc(sessions.updatedAt)).
-        result = await self.db.exec(select(SessionRow).order_by(col(SessionRow.updated_at).desc()))
+        """Every session not archived, most recently active first."""
+        # TS: a query builder, like Drizzle's db.select().from(sessions).where(isNull(...)).orderBy(desc(...)).
+        result = await self.db.exec(
+            select(SessionRow).where(col(SessionRow.archived_at).is_(None)).order_by(col(SessionRow.updated_at).desc())
+        )
         return list(result.all())
 
     async def set_model(self, session: SessionRow, model: str) -> SessionRow:
@@ -69,6 +71,13 @@ class SessionStore:
     async def set_title(self, session: SessionRow, title: str) -> SessionRow:
         """Name the session."""
         session.title = title
+        self.db.add(session)
+        await self.db.commit()
+        return session
+
+    async def archive(self, session: SessionRow) -> SessionRow:
+        """Hide the session from the list; its transcript is kept."""
+        session.archived_at = utcnow()
         self.db.add(session)
         await self.db.commit()
         return session

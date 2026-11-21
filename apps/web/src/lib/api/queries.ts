@@ -21,6 +21,7 @@ export const queryKeys = {
   mcpServers: ["mcp-servers"] as const,
 };
 
+// The sidebar's session list; polled so a run started or finished elsewhere shows up, faster while one runs.
 export function useSessions() {
   return useQuery({
     queryKey: queryKeys.sessions,
@@ -29,6 +30,19 @@ export function useSessions() {
       if (error) throw new Error(errorMessage(error));
       return data;
     },
+    refetchInterval: (query) => (query.state.data?.some((s) => s.running) ? 2000 : 10000),
+  });
+}
+
+// Hides a session from the list; the API refuses (409) while it runs.
+export function useArchiveSession() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await api.POST("/sessions/{session_id}/archive", { params: { path: { session_id: id } } });
+      if (error) throw new Error(errorMessage(error));
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions, exact: true }),
   });
 }
 
