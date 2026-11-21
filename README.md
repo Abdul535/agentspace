@@ -103,3 +103,13 @@ OpenAI-compatible API just needs the factory.
 
 Auth, background runs, parallel tool calls, context compaction, branching, Markdown rendering,
 sandboxed execution. Contributor and agent conventions are in [`AGENTS.md`](AGENTS.md).
+
+## Landing page
+
+`apps/landing` is the public page (ADR-023): a static Next.js export with SEO tags, JSON-LD,
+`robots.txt`, `sitemap.xml`, `/llms.txt` and a share image.
+
+```bash
+pnpm dev:landing                                   # http://localhost:3001 (next to the web app's port)
+SITE_URL=https://example.com APP_URL=https://app.example.com pnpm --filter landing build   # writes apps/landing/out/
+```

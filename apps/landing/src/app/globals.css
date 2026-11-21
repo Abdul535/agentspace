@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-ring: var(--ring);
+  --color-link: var(--link);
+  --color-success: var(--success);
+  --color-sidebar: var(--sidebar);
+  /* Literal names: @theme inline resolves at build time, before next/font sets its variables. */
+  --font-sans: "Geist", "Geist Fallback", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+}
+
+/* Workshop theme (DESIGN.md), same values as apps/web. Dark by default; light when the OS asks for it, with no script and no flash. */
+:root {
+  color-scheme: dark;
+  --background: #141414;
+  --foreground: #ececec;
+  --card: #1c1c1c;
+  --muted: #222222;
+  --muted-foreground: #9a9a9a;
+  --accent: #262626;
+  --border: #2e2e2e;
+  --input: #454545;
+  --primary: #f5c518;
+  --primary-foreground: #111111;
+  --ring: #f5c518;
+  --link: #f5c518;
+  --success: #7bd88f;
+  --sidebar: #0d0d0d;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --background: #f4f4f2;
+    --foreground: #141414;
+    --card: #ffffff;
+    --muted: #efefec;
+    --muted-foreground: #6b6b6b;
+    --accent: #f6f6f3;
+    --border: #dcdcd8;
+    --input: #b5b5b0;
+    /* Yellow text fails contrast on white, so text uses a deeper shade of the accent. */
+    --link: #8a6d00;
+    --success: #1f6f3a;
+    --sidebar: #ffffff;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  html {
+    @apply font-sans;
+    scroll-behavior: smooth;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* The fake run in the hero: the dot pulses like the app's running state. */
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}

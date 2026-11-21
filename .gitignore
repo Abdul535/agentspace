@@ -19,3 +19,6 @@ node_modules/
 
 # Per-worktree ports, written by scripts/worktree-setup.sh (ADR-011)
 .worktree.env
+
+# Static export of the landing page (ADR-023)
+out/
