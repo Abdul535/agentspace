@@ -12,7 +12,8 @@ with a Postgres.
 
 The owner predicted "Postgres everywhere" (`learning-progress.md`, 2026-11-21).
 The prediction's gaps became requirements here:
-- each worktree gets its own database, so two branches' migrations never meet;
+- two branches' migrations must never meet in one database (the owner later chose
+  one shared dev database, so this is now a guard; see below);
 - tests are isolated from each other;
 - dev needs Docker;
 - CI needs a Postgres service.
@@ -63,15 +64,21 @@ How the references do it:
   start at 55320, so it can run next to another project's stack on the 543xx
   defaults. Four containers start: Postgres,
   Studio with its helper postgres-meta, and Kong, which can't be turned off.
-- **One server, one database per checkout.** The main checkout uses
-  `postgres`, the one database Supabase Studio shows (http://localhost:55323).
-  A worktree uses `agentspace_<branch>`
-  (`agentspace_feat_postgres`), which `scripts/worktree-setup.sh` writes into
-  `.worktree.env` as `AGENTSPACE_DATABASE_URL`. It also adds that line to an
-  older `.worktree.env` that only had ports. `scripts/db.sh` checks that Docker
-  is running (and says so plainly if not), starts Supabase when needed, waits
-  for Postgres and creates the database if it's missing. `pnpm dev:api` runs it
-  first, so dev stays one command.
+- **One shared dev database, with an opt-out.** The owner wants the same dev
+  data in every worktree, so every checkout uses `postgres` by default. It's
+  also the one database Supabase Studio shows (http://localhost:55323).
+  - **The risk:** a branch's new migration would upgrade the shared database,
+    and every other checkout's API would then refuse to start ("Can't locate
+    revision"). That's CompanyOS's 2026-11-06 collision.
+  - **The guard:** `scripts/db.sh` refuses to start on the shared database
+    when the branch has migration files that `dev` lacks. It names them and
+    says to run `pnpm db:own`.
+  - **The opt-out:** `pnpm db:own` writes `AGENTSPACE_DATABASE_URL` for
+    `agentspace_<branch>` into `.worktree.env` and creates that database.
+    Deleting the line shares again.
+  - `scripts/db.sh` also checks that Docker is running (and says so plainly if
+    not), starts Supabase when needed and waits for Postgres. `pnpm dev:api`
+    and `scripts/worktree-setup.sh` run it, so dev stays one command.
 - **Tests get a fresh database each** (`tests/pg.py`, `conftest.py`).
   - Each pytest run creates `agentspace_test_<pid>_<random>_template` and
     migrates it once. Every test then gets its own copy (`CREATE DATABASE …
@@ -140,8 +147,11 @@ How the references do it:
 - **A full Supabase stack per worktree** — CompanyOS's isolated mode. About
   0.7 GB of RAM and eight containers each, to isolate what one `CREATE DATABASE`
   already isolates.
-- **One shared dev database** — the collision from CompanyOS's 2026-11-06
-  learning.
+- **A database per worktree, always** — what this ADR first built. Branches
+  never collide, but each worktree starts empty and Studio can't see its data.
+  The owner chose shared data plus the guard and `pnpm db:own`.
+- **One shared database with no guard** — simplest, but one branch's migration
+  silently breaks every other checkout's API.
 - **A rolled-back transaction per test** — fast, but the app opens its own
   connections and commits on every write. A test would have to take over the
   app's engine, and runs in the background would see another transaction.
@@ -158,11 +168,12 @@ How the references do it:
 - The local server listens on `0.0.0.0:55322`, with the password `postgres`, as
   the Supabase CLI sets it. Fine on a laptop, but nothing secret belongs in a
   local database.
-- Old SQLite data isn't carried over, and worktrees created before this change
-  get their own database the next time `scripts/worktree-setup.sh` runs. Until
-  then they use the main checkout's `postgres` database.
-- Studio only shows the main checkout's tables. A worktree's own database is
-  read with psql (`docker exec -it supabase_db_agentspace psql -U postgres -d
+- Old SQLite data isn't carried over.
+- A branch that adds a migration needs `pnpm db:own` before `pnpm dev:api`;
+  the guard says so. After it merges, the other worktrees can run it on the
+  shared database once they're rebased.
+- Studio only shows the shared database. A worktree's own database is read
+  with psql (`docker exec -it supabase_db_agentspace psql -U postgres -d
   <name>`) or a client such as TablePlus.
 - asyncpg connections belong to the event loop that opened them. A test that
   queries outside the app's loop opens its own engine

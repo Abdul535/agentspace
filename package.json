@@ -6,6 +6,7 @@
     "dev:web": "[ -f .worktree.env ] && . ./.worktree.env; pnpm --filter web dev",
     "dev:landing": "[ -f .worktree.env ] && . ./.worktree.env; port=${LANDING_PORT:-$(( ${PORT:-3000} + 1 ))}; APP_URL=${APP_URL:-http://localhost:${PORT:-3000}} SITE_URL=${SITE_URL:-http://localhost:$port} pnpm --filter landing dev --port $port",
     "setup:worktree": "bash scripts/worktree-setup.sh",
+    "db:own": "bash scripts/db.sh --own",
     "build:web": "pnpm --filter web build",
     "lint:web": "pnpm --filter web lint",
     "gen:api": "uv run --project apps/api python apps/api/scripts/export_openapi.py > apps/web/openapi.json && pnpm --filter web gen:api",

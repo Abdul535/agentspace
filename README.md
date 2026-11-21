@@ -38,7 +38,7 @@ The browser only ever talks to the Next.js origin: `/api/*` is rewritten to the 
 `next.config.ts` (set `API_URL` if the backend isn't on `127.0.0.1:8000`), so there is no CORS
 to configure. Migrations run when the API starts. The database is Postgres: `pnpm dev:api` starts
 local Supabase in Docker (so Docker must be running; install the CLI with `brew install supabase/tap/supabase`)
-and creates this checkout's database (ADR-027). The per-session workspaces live in `data/` (gitignored).
+and checks the shared dev database (ADR-027; a branch that adds a migration runs `pnpm db:own` first). The per-session workspaces live in `data/` (gitignored).
 
 ## How it works
 

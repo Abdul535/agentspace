@@ -14,7 +14,7 @@ uv run fastapi dev          # http://127.0.0.1:8000, docs at /docs
 ```
 
 Needs Postgres (ADR-027): run `pnpm dev:api` from the repo root instead, and it starts local Supabase
-in Docker and creates this checkout's database first (`scripts/db.sh`). Migrations run at startup.
+in Docker and checks the shared dev database first (`scripts/db.sh`). Migrations run at startup.
 Per-session workspaces go to `data/`. Tests (`uv run pytest`) need the same server: each test gets a
 fresh copy of a database migrated once per run.
 
