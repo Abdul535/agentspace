@@ -90,10 +90,18 @@ ADR-003 stays as it is for steps 1–25.
     `pricing`, or its billed cost when sent), save it on `Usage`, and show a
     per-session total in the UI.
     *pi:* `cost` in `ai/src/types.ts`, `usage-totals.ts`.
-35. [ ] **Observability.** A trace per run: each model call (model, tokens,
+35. [x] **Observability.** A trace per run: each model call (model, tokens,
     cost, latency) and each tool call, viewable later, with an optional export
     to a tracing tool such as Langfuse. Needs step 34.
     *pi:* `packages/telemetry`, `core/telemetry.ts`.
+    Built as follows (ADR-018), before step 34 at the owner's choice:
+    - `agentspace/tracing.py` turns the loop's events into one Langfuse trace per
+      run: `model` generations (tokens, time to first token, input and output),
+      tool observations, compaction spans, all under a `run` root grouped by
+      session. Fed from `RunManager.drive`'s `emit`; the loop is unchanged.
+    - Off unless `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are set; tracing
+      errors are logged, never raised. Cost is Langfuse's own estimate until
+      step 34 sends ours.
 36. [ ] **Prompt caching.** Mark the stable start of the request (system prompt,
     tools, older turns) as cacheable, and count cache reads/writes in `Usage`.
     Needs step 20 (Anthropic adapter), where it matters most.

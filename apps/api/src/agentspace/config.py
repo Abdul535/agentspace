@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     openrouter_api_key: str | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
+    # Langfuse tracing (ADR-018): off unless both keys are set; the keys come from the project's settings page.
+    langfuse_public_key: str | None = Field(default=None, validation_alias="LANGFUSE_PUBLIC_KEY")
+    langfuse_secret_key: str | None = Field(default=None, validation_alias="LANGFUSE_SECRET_KEY")
+    langfuse_base_url: str = Field(default="https://cloud.langfuse.com", validation_alias="LANGFUSE_BASE_URL")
+    """The EU cloud by default; `https://us.cloud.langfuse.com` for the US one, or a self-hosted URL."""
+
     # TS: @property makes a getter: `settings.resolved_database_url`, read without parentheses.
     @property
     def resolved_database_url(self) -> str:

@@ -35,7 +35,8 @@ Environment variables (or `.env`): `OPENROUTER_API_KEY`, `AGENTSPACE_DEFAULT_MOD
 (default `anthropic/claude-sonnet-5.5`), `AGENTSPACE_DEFAULT_PROVIDER`, `AGENTSPACE_DATA_DIR`,
 `AGENTSPACE_DATABASE_URL`, `AGENTSPACE_MAX_TURNS`, `AGENTSPACE_MAX_OUTPUT_TOKENS` (default 8192; OpenRouter
 refuses a request whose cap is above what the key's remaining credit covers), `AGENTSPACE_ENABLE_BASH`
-(default `false`; gives sessions the `bash` tool, which runs commands unsandboxed as your user). See
+(default `false`; gives sessions the `bash` tool, which runs commands unsandboxed as your user), `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (both set turns on a Langfuse trace per run, ADR-018;
+`LANGFUSE_BASE_URL` defaults to the EU cloud, `https://us.cloud.langfuse.com` for the US one). See
 `src/agentspace/config.py`.
 
 ## Develop

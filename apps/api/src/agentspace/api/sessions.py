@@ -344,6 +344,7 @@ async def stream_run(
         info = await lookup_model()
         # Built here, not once above, so it lists the MCP tools that joined at the start of the run.
         system_prompt = build_system_prompt(session.system_prompt, tools, skills)
+        run.active.trace.set_system_prompt(system_prompt)
         # Only when the catalog says so: an unknown model gets the images, and a refusal is a normal error.
         blind = info is not None and not info.image_input
 

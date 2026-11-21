@@ -16,6 +16,7 @@ from agentspace.mcp.manager import McpManager
 from agentspace.runs import RunManager
 from agentspace.session.db import create_engine, session_factory
 from agentspace.session.migrate import upgrade_to_head
+from agentspace.tracing import Tracer
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -25,7 +26,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # TS: code before `yield` runs at startup and code after it at shutdown, like a setup that returns a cleanup.
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """On startup: create the data folder, migrate the DB, open the engine. On shutdown: stop runs, MCP, the DB."""
+        """Startup: make the data folder, migrate the DB, open the engine. Shutdown: stop runs, MCP, tracing, the DB."""
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         if settings.auto_migrate:
             await asyncify(upgrade_to_head)(settings.resolved_database_url)
@@ -33,8 +34,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # TS: app.state is like Express's app.locals: values every request can reach.
         app.state.settings = settings
         app.state.db_factory = session_factory(engine)
+        # Langfuse traces of each run (ADR-018); a no-op without keys.
+        tracer = Tracer.from_settings(settings)
         # Every session's background run (ADR-007).
-        app.state.runs = RunManager(app.state.db_factory)
+        app.state.runs = RunManager(app.state.db_factory, tracer)
         app.state.model_catalog = OpenRouterCatalog(settings.openrouter_base_url)
         # Each session's MCP server processes (ADR-017); a running session's are never stopped as idle.
         app.state.mcp = McpManager(
@@ -47,6 +50,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         await app.state.runs.shutdown()
         await app.state.mcp.shutdown()
+        # After the runs stop, so their last observations are sent too; off the event loop, since it blocks.
+        await asyncify(tracer.shutdown)()
         await engine.dispose()
 
     app = FastAPI(title="agentspace", lifespan=lifespan)
