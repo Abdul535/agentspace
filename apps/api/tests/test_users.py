@@ -1,13 +1,14 @@
 """Users own their data (ADR-025): two signed-in users can't see each other's sessions or MCP servers."""
 
-import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
+import pg
 import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
+from pg import db_rows
 from test_auth import SUPABASE_URL, FixedKeys, auth, make_token
 
 from agentspace.auth import TokenVerifier
@@ -30,12 +31,6 @@ def client(tmp_path: Path) -> Iterator[TestClient]:
     app.state.auth = TokenVerifier(SUPABASE_URL, keys=FixedKeys())
     with TestClient(app) as client:
         yield client
-
-
-def db_rows(tmp_path: Path, sql: str) -> list[tuple]:
-    """Rows straight from the SQLite file, as someone with a copy of the database would see them."""
-    with sqlite3.connect(tmp_path / "agentspace.db") as db:
-        return db.execute(sql).fetchall()
 
 
 def test_each_user_lists_only_their_own_sessions(client: TestClient) -> None:
@@ -73,10 +68,10 @@ def test_another_users_session_is_a_404_like_a_missing_one(
     assert client.get(f"/sessions/{alice_id}", headers=ALICE).json()["model"] != "other/model"
 
 
-def test_a_user_row_is_saved_on_first_request(client: TestClient, tmp_path: Path) -> None:
+def test_a_user_row_is_saved_on_first_request(client: TestClient) -> None:
     client.get("/sessions", headers=ALICE)
     client.get("/sessions", headers=ALICE)
-    assert db_rows(tmp_path, "SELECT id, email FROM users ORDER BY id") == [
+    assert db_rows("SELECT id, email FROM users ORDER BY id") == [
         ("alice", "alice@example.com"),
         ("local", None),  # made by the migration; owns the rows from before users
     ]
@@ -85,7 +80,7 @@ def test_a_user_row_is_saved_on_first_request(client: TestClient, tmp_path: Path
 def test_local_mode_belongs_to_the_local_user(tmp_path: Path) -> None:
     with TestClient(create_app(Settings(_env_file=None, data_dir=tmp_path))) as client:
         session_id = client.post("/sessions", json={}).json()["id"]
-    assert db_rows(tmp_path, "SELECT id, user_id FROM sessions") == [(session_id, "local")]
+    assert db_rows("SELECT id, user_id FROM sessions") == [(session_id, "local")]
 
 
 def server(name: str = "github", token: str = "ghp_alice") -> dict:
@@ -108,15 +103,15 @@ def test_mcp_servers_are_per_user_and_names_only_clash_within_one_user(client: T
     assert client.get("/mcp-servers", headers=ALICE).json()["servers"][0]["enabled"] is True
 
 
-def test_mcp_env_is_encrypted_in_the_database_and_readable_by_its_owner(client: TestClient, tmp_path: Path) -> None:
+def test_mcp_env_is_encrypted_in_the_database_and_readable_by_its_owner(client: TestClient) -> None:
     created = client.post("/mcp-servers", json=server(), headers=ALICE).json()
     assert created["env"] == {"GITHUB_TOKEN": "ghp_alice"}
-    [(stored,)] = db_rows(tmp_path, "SELECT env FROM mcp_servers")
+    [(stored,)] = db_rows("SELECT env FROM mcp_servers")
     assert "ghp_alice" not in stored and '"v1:' in stored
 
     # A changed value is encrypted again.
     client.patch(f"/mcp-servers/{created['id']}", json={"env": {"GITHUB_TOKEN": "ghp_new"}}, headers=ALICE)
-    [(stored,)] = db_rows(tmp_path, "SELECT env FROM mcp_servers")
+    [(stored,)] = db_rows("SELECT env FROM mcp_servers")
     assert "ghp_new" not in stored
     assert client.get("/mcp-servers", headers=ALICE).json()["servers"][0]["env"] == {"GITHUB_TOKEN": "ghp_new"}
 
@@ -142,29 +137,31 @@ def test_without_a_secret_key_one_is_generated_once_for_this_user_only(tmp_path:
     assert load_server_secret("z" * 32, tmp_path) == "z" * 32
 
 
-def test_the_migration_gives_old_rows_to_the_local_user_and_encrypts_their_env(tmp_path: Path) -> None:
+def test_the_migration_gives_old_rows_to_the_local_user_and_encrypts_their_env(database_url: str) -> None:
+    # The test's database is migrated already; start this one from nothing.
+    pg.drop_database(name := database_url.rsplit("/", 1)[1])
+    pg.create_database(name)
     config = Config(API_ROOT / "alembic.ini")
     config.set_main_option("script_location", str(API_ROOT / "migrations"))
-    config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{tmp_path / 'agentspace.db'}")
+    config.set_main_option("sqlalchemy.url", database_url)
     config.attributes["configure_logger"] = False
     box = SecretBox("k" * 32)
     config.attributes["secret_box"] = box
     command.upgrade(config, "b7e2a9c41d05")  # the last revision before users
-    with sqlite3.connect(tmp_path / "agentspace.db") as db:
-        db.execute(
-            "INSERT INTO sessions (id, provider, model, system_prompt, tools, thinking_level, created_at, updated_at)"
-            " VALUES ('s1', 'p', 'm', '', '[]', 'off', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
-        )
-        db.execute(
-            "INSERT INTO mcp_servers (id, name, command, args, env, enabled, created_at, updated_at)"
-            " VALUES ('m1', 'gh', 'npx', '[]', ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-            ['{"TOKEN": "ghp_old"}'],
-        )
+    db_rows(
+        "INSERT INTO sessions (id, provider, model, system_prompt, tools, thinking_level, created_at, updated_at)"
+        " VALUES ('s1', 'p', 'm', '', '[]', 'off', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+    )
+    db_rows(
+        "INSERT INTO mcp_servers (id, name, command, args, env, enabled, created_at, updated_at)"
+        " VALUES ('m1', 'gh', 'npx', '[]', $1, true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+        '{"TOKEN": "ghp_old"}',
+    )
 
     command.upgrade(config, "head")
-    assert db_rows(tmp_path, "SELECT user_id FROM sessions") == [("local",)]
-    [(user_id, env)] = db_rows(tmp_path, "SELECT user_id, json_extract(env, '$.TOKEN') FROM mcp_servers")
+    assert db_rows("SELECT user_id FROM sessions") == [("local",)]
+    [(user_id, env)] = db_rows("SELECT user_id, env->>'TOKEN' FROM mcp_servers")
     assert user_id == "local" and box.decrypt("local", env) == "ghp_old"
 
     command.downgrade(config, "b7e2a9c41d05")
-    assert db_rows(tmp_path, "SELECT env FROM mcp_servers") == [('{"TOKEN": "ghp_old"}',)]
+    assert db_rows("SELECT env->>'TOKEN' FROM mcp_servers") == [("ghp_old",)]

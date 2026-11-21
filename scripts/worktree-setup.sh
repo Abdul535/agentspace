@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepares a new git worktree to run (ADR-011): copies secrets, installs deps, picks free ports.
+# Prepares a new git worktree to run (ADR-011): copies secrets, installs deps, picks free ports and its own database.
 # T3 runs it when it creates a worktree; it is safe to run again by hand.
 set -euo pipefail
 
@@ -9,7 +9,7 @@ main="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
 cd "$here"
 
 if [ "$here" = "$main" ]; then
-  echo "This is the main checkout: it keeps the default ports (API 8000, web 3000). Nothing to do."
+  echo "This is the main checkout: it keeps the default ports (API 8000, web 3000) and the \`agentspace\` database."
   exit 0
 fi
 
@@ -41,13 +41,25 @@ if [ ! -f .worktree.env ]; then
     slot=$((slot + 1))
   done
   cat >.worktree.env <<EOF
-# Ports for this worktree, read by \`pnpm dev:api\` and \`pnpm dev:web\` (written by scripts/worktree-setup.sh).
+# Ports and database for this worktree, read by \`pnpm dev:api\` and \`pnpm dev:web\` (written by scripts/worktree-setup.sh).
 export API_PORT=$api
 export PORT=$web
 export API_URL=http://127.0.0.1:$api
 EOF
 fi
 
+# Its own database on the shared local Postgres (ADR-027), so two branches' migrations never meet.
+# Added to an older .worktree.env too, which only had ports.
+if ! grep -q '^export AGENTSPACE_DATABASE_URL=' .worktree.env; then
+  # Postgres names: lowercase letters, digits and `_`, at most 63 characters.
+  slug="$(git rev-parse --abbrev-ref HEAD | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '_')"
+  db="$(printf 'agentspace_%s' "$slug" | cut -c1-63)"
+  echo "export AGENTSPACE_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:55322/$db" >>.worktree.env
+fi
+
+# Without Docker the worktree is still set up; `pnpm dev:api` tries again and says what's missing.
+bash scripts/db.sh || echo "The database isn't ready yet; \`pnpm dev:api\` will create it."
+
 # shellcheck source=/dev/null
 . ./.worktree.env
-echo "Ready: API on http://127.0.0.1:$API_PORT, web on http://localhost:$PORT"
+echo "Ready: API on http://127.0.0.1:$API_PORT, web on http://localhost:$PORT, database ${AGENTSPACE_DATABASE_URL##*/}"

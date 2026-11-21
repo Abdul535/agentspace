@@ -16,9 +16,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="AGENTSPACE_", env_file=".env", extra="ignore")
 
     data_dir: Path = Path("data")
-    """Holds the SQLite database and each session's workspace folder."""
-    database_url: str | None = None
-    """Defaults to a SQLite file in `data_dir`."""
+    """Holds each session's workspace folder, the skills and the generated secret key."""
+    database_url: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:55322/agentspace"
+    """A Postgres URL (ADR-027). The default is the main checkout's database on the local Supabase that
+    `pnpm dev:api` starts; each worktree sets its own in `.worktree.env`."""
+    database_pool_size: int = Field(default=5, ge=1)
+    """Connections kept open per API process; up to as many more open when it's busy."""
+    database_statement_timeout_ms: int = Field(default=25_000, ge=1)
+    """The longest one SQL statement may run before Postgres cancels it."""
 
     default_provider: str = "openrouter"
     default_model: str = "anthropic/claude-sonnet-5.5"
@@ -77,12 +82,7 @@ class Settings(BaseSettings):
     langfuse_base_url: str = Field(default="https://cloud.langfuse.com", validation_alias="LANGFUSE_BASE_URL")
     """The EU cloud by default; `https://us.cloud.langfuse.com` for the US one, or a self-hosted URL."""
 
-    # TS: @property makes a getter: `settings.resolved_database_url`, read without parentheses.
-    @property
-    def resolved_database_url(self) -> str:
-        """`database_url` if set, else the SQLite file in `data_dir`."""
-        return self.database_url or f"sqlite+aiosqlite:///{self.data_dir / 'agentspace.db'}"
-
+    # TS: @property makes a getter: `settings.resolved_skills_dir`, read without parentheses.
     @property
     def resolved_skills_dir(self) -> Path:
         """`skills_dir` if set, else the `skills` folder in `data_dir`."""

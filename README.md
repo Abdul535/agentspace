@@ -12,7 +12,7 @@ this repo ([pi](https://github.com/earendil-works/pi) is the reference design, n
 
 | | |
 |---|---|
-| `apps/api/` | Python 3.13, FastAPI, SQLModel + SQLite (async), Alembic, uv |
+| `apps/api/` | Python 3.13, FastAPI, SQLModel + Postgres (async, asyncpg), Alembic, uv |
 | `apps/web/` | Next.js 16 (App Router), TypeScript, Tailwind CSS 4, shadcn/ui, TanStack Query, pnpm |
 | Models | Any OpenAI-compatible API; OpenRouter out of the box |
 
@@ -36,8 +36,9 @@ pnpm dev:web                # http://localhost:3000
 
 The browser only ever talks to the Next.js origin: `/api/*` is rewritten to the API in
 `next.config.ts` (set `API_URL` if the backend isn't on `127.0.0.1:8000`), so there is no CORS
-to configure. Migrations run when the API starts. The SQLite database and the per-session
-workspaces live in `data/` (gitignored).
+to configure. Migrations run when the API starts. The database is Postgres: `pnpm dev:api` starts
+local Supabase in Docker (so Docker must be running; install the CLI with `brew install supabase/tap/supabase`)
+and creates this checkout's database (ADR-027). The per-session workspaces live in `data/` (gitignored).
 
 ## How it works
 
@@ -54,7 +55,7 @@ prompt ──> agent loop ──> provider (OpenRouter) ──> model
   back, repeat until a reply has no tool calls or `max_turns` is hit. It emits events
   (`turn_start`, `message_delta`, `tool_start`, `message_end`, …) and owns no storage.
 - **`tools/`** — `read` and `write`, refused for any path outside the session's workspace.
-- **`session/`** — sessions and an append-only message transcript in SQLite.
+- **`session/`** — sessions and an append-only message transcript in Postgres.
 - **`api/`** — `POST /sessions`, `GET /sessions`, `GET /sessions/{id}`, and
   `POST /sessions/{id}/messages`, which streams the run's events as SSE. One run per session
   at a time.

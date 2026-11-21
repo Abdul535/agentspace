@@ -2,7 +2,7 @@
   "name": "agentspace",
   "private": true,
   "scripts": {
-    "dev:api": "[ -f .worktree.env ] && . ./.worktree.env; cd apps/api && uv run fastapi dev --port ${API_PORT:-8000}",
+    "dev:api": "[ -f .worktree.env ] && . ./.worktree.env; bash scripts/db.sh && cd apps/api && uv run fastapi dev --port ${API_PORT:-8000}",
     "dev:web": "[ -f .worktree.env ] && . ./.worktree.env; pnpm --filter web dev",
     "dev:landing": "[ -f .worktree.env ] && . ./.worktree.env; port=${LANDING_PORT:-$(( ${PORT:-3000} + 1 ))}; APP_URL=${APP_URL:-http://localhost:${PORT:-3000}} SITE_URL=${SITE_URL:-http://localhost:$port} pnpm --filter landing dev --port $port",
     "setup:worktree": "bash scripts/worktree-setup.sh",
@@ -10,7 +10,7 @@
     "lint:web": "pnpm --filter web lint",
     "gen:api": "uv run --project apps/api python apps/api/scripts/export_openapi.py > apps/web/openapi.json && pnpm --filter web gen:api",
     "check": "pnpm check:api && pnpm check:web && pnpm check:landing",
-    "check:api": "cd apps/api && uv run --locked ruff check . && uv run ruff format --check . && uv run ty check --error-on-warning && uv run pytest -q",
+    "check:api": "cd apps/api && uv run --locked ruff check . && uv run ruff format --check . && uv run ty check --error-on-warning && bash ../../scripts/db.sh --server && uv run pytest -q",
     "check:web": "pnpm lint:web && pnpm --filter web typecheck && pnpm check:api-types && pnpm build:web",
     "check:api-types": "pnpm gen:api && git diff --exit-code -- apps/web/openapi.json apps/web/src/lib/api/schema.d.ts || (echo \"API types are stale: run pnpm gen:api and commit the result.\" && exit 1)",
     "check:landing": "pnpm --filter landing lint && pnpm --filter landing typecheck && pnpm --filter landing build",

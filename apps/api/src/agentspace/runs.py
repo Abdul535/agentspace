@@ -34,6 +34,7 @@ from agentspace.agent.loop import Emit
 from agentspace.agent.messages import AgentMessage
 from agentspace.ai.messages import AssistantMessage, TextContent, ThinkingContent, UserMessage
 from agentspace.ai.provider import TextDeltaEvent, ThinkingDeltaEvent, ToolCallEndEvent
+from agentspace.session.db import release
 from agentspace.session.models import LOCAL_USER_ID, SessionRow
 from agentspace.session.store import SessionStore
 from agentspace.tracing import RunTrace, Tracer
@@ -301,6 +302,8 @@ class RunManager:
             if session is None:
                 raise LookupError(f"Session {run.session_id} disappeared before its run started.")
             store = SessionStore(db, session.user_id)
+            # Not held while the model works: each saved message takes a connection only for its write.
+            await release(db)
 
             async def emit(event: AgentEvent) -> None:
                 """Save, update snapshot and trace, then publish: a client never sees a message that isn't saved."""

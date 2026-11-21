@@ -13,7 +13,10 @@ echo 'OPENROUTER_API_KEY=sk-or-...' > .env
 uv run fastapi dev          # http://127.0.0.1:8000, docs at /docs
 ```
 
-Migrations run at startup. Data (SQLite database and per-session workspaces) goes to `data/`.
+Needs Postgres (ADR-027): run `pnpm dev:api` from the repo root instead, and it starts local Supabase
+in Docker and creates this checkout's database first (`scripts/db.sh`). Migrations run at startup.
+Per-session workspaces go to `data/`. Tests (`uv run pytest`) need the same server: each test gets a
+fresh copy of a database migrated once per run.
 
 ## Try it
 
@@ -33,7 +36,7 @@ curl -s localhost:8000/sessions/<id>
 
 Environment variables (or `.env`): `OPENROUTER_API_KEY`, `AGENTSPACE_DEFAULT_MODEL`
 (default `anthropic/claude-sonnet-5.5`), `AGENTSPACE_DEFAULT_PROVIDER`, `AGENTSPACE_DATA_DIR`,
-`AGENTSPACE_DATABASE_URL`, `AGENTSPACE_MAX_TURNS`, `AGENTSPACE_MAX_OUTPUT_TOKENS` (default 8192; OpenRouter
+`AGENTSPACE_DATABASE_URL` (a `postgresql+asyncpg://` URL; `AGENTSPACE_DATABASE_POOL_SIZE` and `AGENTSPACE_DATABASE_STATEMENT_TIMEOUT_MS` tune its connections), `AGENTSPACE_MAX_TURNS`, `AGENTSPACE_MAX_OUTPUT_TOKENS` (default 8192; OpenRouter
 refuses a request whose cap is above what the key's remaining credit covers), `AGENTSPACE_ENABLE_BASH`
 (default `false`; gives sessions the `bash` tool, which runs commands unsandboxed as your user), `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` (both set turns on a Langfuse trace per run, ADR-018;
 `LANGFUSE_BASE_URL` defaults to the EU cloud, `https://us.cloud.langfuse.com` for the US one),
