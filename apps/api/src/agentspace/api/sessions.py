@@ -4,11 +4,11 @@ import base64
 import binascii
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from asyncer import asyncify
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from fastapi.sse import EventSourceResponse
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
 from agentspace.agent.compaction import build_context, can_compact, compact, context_tokens
@@ -36,7 +36,7 @@ from agentspace.api.deps import CatalogDep, DBDep, Run, RunDep, RunsDep, Session
 from agentspace.api.mcp_servers import McpDep, McpServerConfigsDep
 from agentspace.config import Settings
 from agentspace.mcp.manager import McpManager, ServerConfig
-from agentspace.runs import QueueKind, RunManager, RunSnapshot, read_events
+from agentspace.runs import ActiveRun, QueueKind, RunManager, RunSnapshot, Subscriber, read_events
 from agentspace.session.db import release
 from agentspace.session.models import SessionRow
 from agentspace.tools import TOOL_SETS, ToolSetName, allows_mcp, build_tools
@@ -207,6 +207,14 @@ async def archive_session(session: SessionRowDep, store: StoreDep, runs: RunsDep
     await store.archive(session)
 
 
+# The routes yield `ServerSentEvent`s (for their ids), which FastAPI leaves out of OpenAPI; this puts the
+# event types back, so `pnpm gen:api` still gives the web app `AgentEvent` and `RunSnapshot`.
+RUN_EVENTS: dict[int | str, dict[str, Any]] = {200: {"model": AgentEvent, "description": "The run's events, as SSE."}}
+WATCH_EVENTS: dict[int | str, dict[str, Any]] = {
+    200: {"model": RunSnapshot | AgentEvent, "description": "A snapshot, or the missed events, then live ones."}
+}
+
+
 def no_transform(response: Response) -> None:
     """Forbid proxies from compressing the event stream: gzip holds events back until the stream ends."""
     # The Next.js server gzips proxied responses unless Cache-Control has `no-transform`.
@@ -215,7 +223,12 @@ def no_transform(response: Response) -> None:
     response.headers["Cache-Control"] = "no-cache, no-transform"
 
 
-@router.post("/{session_id}/messages", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
+@router.post(
+    "/{session_id}/messages",
+    response_class=EventSourceResponse,
+    responses=RUN_EVENTS,
+    dependencies=[Depends(no_transform)],
+)
 async def send_message(
     # Listed before `run`, so a bad image is refused before the run's slot is claimed.
     prompt: Annotated[UserMessage, Depends(prompt_message)],
@@ -226,10 +239,12 @@ async def send_message(
     catalog: CatalogDep,
     mcp: McpDep,
     mcp_servers: McpServerConfigsDep,
-) -> AsyncIterable[AgentEvent]:
+) -> AsyncIterable[ServerSentEvent]:
     """Start a run on a new user message and stream its events as SSE.
 
     Each SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.
+    Its `id` numbers the event in the run (ADR-028): send the last one as `Last-Event-ID`
+    to `GET .../events` after a dropped connection to get only what was missed.
     The server owns the run (ADR-007): closing this stream only stops listening.
     Reattach with `GET .../events`; stop the run with `POST .../abort`.
     """
@@ -253,7 +268,12 @@ def continuable(run: RunDep) -> Run:
     return run
 
 
-@router.post("/{session_id}/continue", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
+@router.post(
+    "/{session_id}/continue",
+    response_class=EventSourceResponse,
+    responses=RUN_EVENTS,
+    dependencies=[Depends(no_transform)],
+)
 async def continue_run(
     run: Annotated[Run, Depends(continuable)],
     db: DBDep,
@@ -262,7 +282,7 @@ async def continue_run(
     catalog: CatalogDep,
     mcp: McpDep,
     mcp_servers: McpServerConfigsDep,
-) -> AsyncIterable[AgentEvent]:
+) -> AsyncIterable[ServerSentEvent]:
     """Start a run on the transcript as it is, with no new message: a retry after an error, a stop or a crash.
 
     Streams like `POST .../messages`. 409 if a run is going, 422 if the transcript
@@ -283,10 +303,15 @@ def compactable(run: RunDep, settings: SettingsDep) -> Run:
     return run
 
 
-@router.post("/{session_id}/compact", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
+@router.post(
+    "/{session_id}/compact",
+    response_class=EventSourceResponse,
+    responses=RUN_EVENTS,
+    dependencies=[Depends(no_transform)],
+)
 async def compact_session(
     run: Annotated[Run, Depends(compactable)], db: DBDep, settings: SettingsDep, runs: RunsDep
-) -> AsyncIterable[AgentEvent]:
+) -> AsyncIterable[ServerSentEvent]:
     """Summarize the older part of the transcript now (ADR-009); streams the run's events like `.../continue`.
 
     409 if a run is going, 422 if the conversation is too short to compact.
@@ -310,8 +335,14 @@ async def compact_session(
 
     await release(db)
     queue = runs.start(run.active, loop)
-    async for event in read_events(run.active, queue):
+    async for event in stream(run.active, queue):
         yield event
+
+
+async def stream(active: ActiveRun, queue: Subscriber) -> AsyncIterator[ServerSentEvent]:
+    """A subscriber's events as SSE, each with its id so the client can resume after it (ADR-028)."""
+    async for numbered in read_events(active, queue):
+        yield ServerSentEvent(data=numbered.event, id=active.event_id(numbered.seq))
 
 
 # Looks up the session model in the catalog when the run needs it; None when the catalog doesn't know it.
@@ -340,7 +371,7 @@ async def stream_run(
     lookup_model: ModelLookup,
     mcp: McpManager,
     mcp_servers: list[ServerConfig],
-) -> AsyncIterator[AgentEvent]:
+) -> AsyncIterator[ServerSentEvent]:
     """Start the claimed run in the background, on a prompt or continuing, and yield its events to this client.
 
     The tools are the session's built-in ones plus those of the enabled MCP servers that connect in time (ADR-017).
@@ -435,27 +466,45 @@ async def stream_run(
 
     queue = runs.start(run.active, loop)
     # TS: each `yield` sends one SSE event to the client the moment it happens.
-    async for event in read_events(run.active, queue):
+    async for event in stream(run.active, queue):
         yield event
 
 
-@router.get("/{session_id}/events", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
+@router.get(
+    "/{session_id}/events",
+    response_class=EventSourceResponse,
+    responses=WATCH_EVENTS,
+    dependencies=[Depends(no_transform)],
+)
 async def watch_session(
-    session: SessionRowDep, store: StoreDep, runs: RunsDep
-) -> AsyncIterable[RunSnapshot | AgentEvent]:
+    session: SessionRowDep,
+    store: StoreDep,
+    runs: RunsDep,
+    last_event_id: Annotated[str | None, Header()] = None,
+) -> AsyncIterable[ServerSentEvent]:
     """Attach to the session's run: a `run_snapshot` first, then live events until the run ends.
 
-    With no run in progress, the stream is one snapshot of the saved transcript.
+    With `Last-Event-ID` from this run (ADR-028), the stream skips the snapshot and sends
+    only the events after that id. If they can't be replayed (another run, or too old),
+    it falls back to a snapshot. With no run in progress, the stream is one snapshot of
+    the saved transcript.
     """
     active = runs.get(session.id)
     if active is None:
-        yield RunSnapshot(running=False, messages=await store.messages(session.id))
+        yield ServerSentEvent(data=RunSnapshot(running=False, messages=await store.messages(session.id)))
         return
     await release(store.db)
-    # Snapshot and subscribe with no `await` between them, so no event can fall in the gap.
-    snapshot, queue = active.snapshot(), active.subscribe()
-    yield snapshot
-    async for event in read_events(active, queue):
+    resumed = active.resume(last_event_id) if last_event_id else None
+    if resumed:
+        missed, queue = resumed
+        for numbered in missed:
+            yield ServerSentEvent(data=numbered.event, id=active.event_id(numbered.seq))
+    else:
+        # Snapshot and subscribe with no `await` between them, so no event can fall in the gap.
+        snapshot, queue = active.snapshot(), active.subscribe()
+        # The snapshot holds every event up to `seq`, so resuming after it starts at the next one.
+        yield ServerSentEvent(data=snapshot, id=active.event_id(active.seq))
+    async for event in stream(active, queue):
         yield event
 
 

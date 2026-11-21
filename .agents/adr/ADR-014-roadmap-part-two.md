@@ -77,11 +77,15 @@ ADR-003 stays as it is for steps 1–25.
 31. [ ] **Provider failover.** When retries on one provider run out, try the
     same request on a backup model or provider from a list. Needs step 20 for a
     second provider. *pi:* `model-resolver.ts`. *opencode:* `model-retry.ts`.
-32. [ ] **Event replay without duplicates.** Number each run event. A client
+32. [x] **Event replay without duplicates.** Number each run event. A client
     that reconnects sends the last number it saw (SSE `Last-Event-ID`) and gets
     only what it missed, never an event twice. Today a reconnect gets a fresh
     snapshot of the reply instead (ADR-007).
     *pi:* durable's "Watching a Conversation" (`from` on a watch).
+    Built as follows (ADR-028): ids `<run_id>.<seq>`, the run keeps its last
+    10,000 events, `GET .../events` resumes from `Last-Event-ID` or falls back to
+    a snapshot, FastAPI's built-in 15 s `: ping`, and the web client reconnects
+    by itself with a "Reconnecting…" cue.
 33. [ ] **Runs across several workers.** Move the run lock and the event fan-out
     out of one process (a DB lock, then a shared stream such as Redis Streams),
     so the API can run with several workers. Deferred by ADR-007; supersedes part

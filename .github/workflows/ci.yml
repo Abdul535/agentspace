@@ -22,9 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The tests make their own databases on it (ADR-027): the same Postgres image local Supabase runs.
+    # From Docker Hub, not public.ecr.aws: ECR Public refuses anonymous pulls from GitHub runners ("Data limit exceeded").
     services:
       postgres:
-        image: public.ecr.aws/supabase/postgres:17.6.1.167
+        image: supabase/postgres:17.6.1.167
         env:
           POSTGRES_PASSWORD: postgres
         ports:

@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Callable, Iterator
 from pathlib import Path
 from typing import cast
 
+import fastapi.routing
 import pytest
 from anyio.from_thread import BlockingPortal
 from fastapi import FastAPI
@@ -61,6 +62,11 @@ def client(tmp_path: Path, provider: GatedProvider) -> Iterator[TestClient]:
 def sse_events(text: str) -> list[dict]:
     """Parse an SSE body into the JSON object of each event's `data` field."""
     return [json.loads(line.removeprefix("data: ")) for line in text.splitlines() if line.startswith("data: ")]
+
+
+def sse_ids(text: str) -> list[str]:
+    """The `id` field of each SSE event that has one, in order."""
+    return [line.removeprefix("id: ") for line in text.splitlines() if line.startswith("id: ")]
 
 
 def in_background(fn: Callable[[], object]) -> dict:
@@ -172,7 +178,7 @@ def test_closing_a_subscription_does_not_stop_the_run(client: TestClient) -> Non
 
         queue = runs.start(active, loop)
         events = read_events(active, queue)
-        assert (await anext(events)).type == "message_start"
+        assert (await anext(events)).event.type == "message_start"
         await events.aclose()  # the client went away
         assert not active.subscribers
 
@@ -200,7 +206,7 @@ def test_a_crashed_loop_ends_its_subscribers_with_an_error_and_frees_the_slot(cl
             raise RuntimeError("boom")
 
         queue = runs.start(active, loop)
-        return [event async for event in read_events(active, queue)]
+        return [numbered.event async for numbered in read_events(active, queue)]
 
     events = portal(client).call(scenario)
     assert [e.type for e in events] == ["turn_start", "agent_end"] and events[-1].reason == "error"
@@ -321,3 +327,90 @@ def test_a_streaming_run_holds_no_database_connection_while_the_model_works(
     portal(client).call(provider.gate.set)
     post["thread"].join(5)
     watch["thread"].join(5)
+
+
+def test_every_event_of_a_run_has_the_next_id_of_that_run(client: TestClient, provider: GatedProvider) -> None:
+    session_id = client.post("/sessions", json={}).json()["id"]
+    portal(client).call(provider.gate.set)
+    body = client.post(f"/sessions/{session_id}/messages", json={"content": "hi"}).text
+
+    ids = sse_ids(body)
+    assert len(ids) == len(sse_events(body))
+    run_ids = {i.split(".")[0] for i in ids}
+    assert len(run_ids) == 1
+    assert [int(i.split(".")[1]) for i in ids] == list(range(1, len(ids) + 1))
+
+
+def test_reconnecting_with_last_event_id_sends_only_the_missed_events(
+    client: TestClient, provider: GatedProvider
+) -> None:
+    session_id = client.post("/sessions", json={}).json()["id"]
+    runs: RunManager = cast(FastAPI, client.app).state.runs
+    post = in_background(lambda: client.post(f"/sessions/{session_id}/messages", json={"content": "hi"}))
+    assert provider.waiting.wait(5)
+    active = runs.get(session_id)
+    assert active is not None
+    # The client saw up to the "Hel" delta, then lost its connection.
+    seen = next(e for e in active.recent if e.event.type == "message_update")
+
+    async def open_gate_soon() -> None:
+        await asyncio.sleep(0.2)
+        provider.gate.set()
+
+    portal(client).start_task_soon(open_gate_soon)
+    response = client.get(f"/sessions/{session_id}/events", headers={"Last-Event-ID": active.event_id(seen.seq)})
+    post["thread"].join(5)
+
+    events = sse_events(response.text)
+    # No snapshot: the client keeps what it has and adds the rest, so "Hel" isn't shown twice.
+    assert events[0]["type"] != "run_snapshot"
+    assert [e["event"]["delta"] for e in events if e["type"] == "message_update"] == ["lo"]
+    assert events[-1]["type"] == "agent_end"
+    # Together with what the client saw, the ids cover the run once each.
+    full = sse_ids(post["result"].text)
+    assert full[: seen.seq] + sse_ids(response.text) == full
+
+
+def test_an_id_from_another_run_gets_a_snapshot_instead(client: TestClient, provider: GatedProvider) -> None:
+    session_id = client.post("/sessions", json={}).json()["id"]
+    post = in_background(lambda: client.post(f"/sessions/{session_id}/messages", json={"content": "hi"}))
+    assert provider.waiting.wait(5)
+    portal(client).start_task_soon(provider.gate.set)
+    events = sse_events(client.get(f"/sessions/{session_id}/events", headers={"Last-Event-ID": "oldrun.7"}).text)
+    post["thread"].join(5)
+    assert events[0]["type"] == "run_snapshot"
+
+
+def test_resume_replays_only_when_every_missed_event_is_still_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(agentspace.runs, "REPLAY_SIZE", 3)
+    run = ActiveRun(session_id="s", messages=[], history_size=0)
+    for turn in range(1, 6):
+        run.publish(TurnStartEvent(turn=turn))  # events 1..5; only 3..5 are kept
+
+    resumed = run.resume(run.event_id(2))
+    assert resumed is not None
+    assert [e.seq for e in resumed[0]] == [3, 4, 5]
+    up_to_date = run.resume(run.event_id(5))
+    assert up_to_date is not None and up_to_date[0] == []
+    assert run.resume(run.event_id(1)) is None  # event 2 is gone
+    assert run.resume(run.event_id(6)) is None  # from the future
+    assert run.resume("someotherrun.3") is None
+    assert run.resume(f"{run.run_id}.x") is None
+    assert run.resume("garbage") is None
+
+
+def test_a_quiet_stream_gets_a_heartbeat_comment(
+    client: TestClient, provider: GatedProvider, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # FastAPI sends `: ping` after 15 s of silence; shortened here so the test is quick.
+    monkeypatch.setattr(fastapi.routing, "_PING_INTERVAL", 0.05)
+    session_id = client.post("/sessions", json={}).json()["id"]
+
+    async def open_gate_soon() -> None:
+        await asyncio.sleep(0.3)
+        provider.gate.set()
+
+    portal(client).start_task_soon(open_gate_soon)
+    body = client.post(f"/sessions/{session_id}/messages", json={"content": "hi"}).text
+    assert ": ping" in body.splitlines()
+    assert sse_events(body)[-1]["reason"] == "done"

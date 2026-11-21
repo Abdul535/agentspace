@@ -3,8 +3,10 @@
 The HTTP request that starts a run is only its first subscriber: closing it stops
 the listening, not the run. A client that (re)connects gets a `RunSnapshot`
 (transcript so far + the reply being written), then live events, like pi's
-`agent.state` followed by `agent.subscribe()`. Runs live in this process's
-memory, so the API runs as one worker.
+`agent.state` followed by `agent.subscribe()`. Every event is numbered (ADR-028),
+so a client that lost its connection resumes from the last id it saw, with nothing
+missed and nothing twice. Runs live in this process's memory, so the API runs as
+one worker.
 
 While a run is going, the user can queue messages (ADR-003 step 14): steering goes
 in after the current turn, follow-ups once the run would otherwise stop.
@@ -13,6 +15,8 @@ in after the current turn, follow-ups once the run would otherwise stop.
 import asyncio
 import contextlib
 import logging
+import uuid
+from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal
@@ -43,6 +47,8 @@ log = logging.getLogger(__name__)
 
 # Events a subscriber may fall behind by before it is dropped; it reconnects and catches up from a snapshot.
 SUBSCRIBER_QUEUE_SIZE = 10_000
+# Recent events a run keeps for clients that reconnect; one that missed more gets a snapshot instead.
+REPLAY_SIZE = 10_000
 
 
 class RunSnapshot(BaseModel):
@@ -58,8 +64,17 @@ class RunSnapshot(BaseModel):
     """Ids of tool calls still executing."""
 
 
+# TS: frozen=True makes instances read-only, like `Readonly<{ seq: number; event: AgentEvent }>`.
+@dataclass(frozen=True)
+class RunEvent:
+    """An event and its number in the run: 1 for the first, counting up with no gaps."""
+
+    seq: int
+    event: AgentEvent
+
+
 # What a subscriber's queue carries; None marks the end of the stream.
-type Subscriber = asyncio.Queue[AgentEvent | None]
+type Subscriber = asyncio.Queue[RunEvent | None]
 
 # The loop with everything bound except `emit`, which the manager supplies.
 # TS: type LoopFn = (emit: Emit) => Promise<void>
@@ -109,6 +124,12 @@ class ActiveRun:
     history_size: int
     user_id: str = LOCAL_USER_ID
     """Who owns the session; their runs at once are capped (ADR-026)."""
+    run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    """Names this run in event ids, so an id from an earlier run of the session is never resumed in this one."""
+    seq: int = 0
+    """Number of the last event published."""
+    recent: deque[RunEvent] = field(default_factory=lambda: deque(maxlen=REPLAY_SIZE))
+    """The latest events, oldest first, for clients that reconnect (`resume`)."""
     # TS: `field(default_factory=...)` gives each instance a fresh value; a plain `= set()` would be shared.
     subscribers: set[Subscriber] = field(default_factory=set)
     streaming: AssistantMessage | None = None
@@ -143,6 +164,10 @@ class ActiveRun:
             self.accepting = False
         return taken
 
+    def event_id(self, seq: int) -> str:
+        """The SSE id of event `seq`, which a client sends back as `Last-Event-ID` to resume after it."""
+        return f"{self.run_id}.{seq}"
+
     def snapshot(self) -> RunSnapshot:
         """The run's state now; copied, because the run keeps changing it after this returns."""
         return RunSnapshot(
@@ -157,6 +182,23 @@ class ActiveRun:
         queue: Subscriber = asyncio.Queue(maxsize=SUBSCRIBER_QUEUE_SIZE)
         self.subscribers.add(queue)
         return queue
+
+    def resume(self, last_event_id: str) -> tuple[list[RunEvent], Subscriber] | None:
+        """The events after `last_event_id` and a queue for the rest; None if they can't be replayed exactly.
+
+        None when the id is from another run, malformed, or older than what `recent` still holds:
+        the client then needs a snapshot. No `await` here, so no event falls between the two.
+        """
+        run_id, _, seq_text = last_event_id.partition(".")
+        if run_id != self.run_id or not seq_text.isdigit():
+            return None
+        seq = int(seq_text)
+        oldest = self.recent[0].seq if self.recent else self.seq + 1
+        # Replayable only if every event after `seq` is still in `recent`.
+        if seq > self.seq or seq < oldest - 1:
+            return None
+        # TS: a comprehension, like `recent.filter((e) => e.seq > seq)`.
+        return [e for e in self.recent if e.seq > seq], self.subscribe()
 
     def track(self, event: AgentEvent) -> None:
         """Keep the snapshot state current: finished messages, the reply in progress, running tools."""
@@ -193,11 +235,14 @@ class ActiveRun:
                 self.ended = True
 
     def publish(self, event: AgentEvent) -> None:
-        """Hand the event to every subscriber; one that has fallen too far behind is dropped."""
+        """Number the event, keep it for replay and hand it to every subscriber; one too far behind is dropped."""
+        self.seq += 1
+        numbered = RunEvent(self.seq, event)
+        self.recent.append(numbered)
         # A copy, because dropping a subscriber changes the set while we loop over it.
         for queue in list(self.subscribers):
             try:
-                queue.put_nowait(event)
+                queue.put_nowait(numbered)
             except asyncio.QueueFull:
                 log.warning("Dropping a slow subscriber of session %s", self.session_id)
                 self.subscribers.discard(queue)
@@ -217,7 +262,7 @@ def end_stream(queue: Subscriber) -> None:
     queue.put_nowait(None)
 
 
-async def read_events(run: ActiveRun, queue: Subscriber) -> AsyncGenerator[AgentEvent]:
+async def read_events(run: ActiveRun, queue: Subscriber) -> AsyncGenerator[RunEvent]:
     """Yield a subscriber's events until the run ends; leaving early (client gone) only unsubscribes."""
     try:
         # TS: `:=` assigns inside the condition, like `while ((event = await queue.get()) !== null)`.
