@@ -71,10 +71,15 @@ def load_server_secret(secret_key: str | None, data_dir: Path) -> str:
     if secret_key:
         return secret_key
     path = data_dir / "secret.key"
-    if not path.exists():
-        data_dir.mkdir(parents=True, exist_ok=True)
-        # Readable by this user only, like an SSH key.
-        path.write_text(secrets.token_urlsafe(32))
-        path.chmod(0o600)
-        log.warning("AGENTSPACE_SECRET_KEY is not set: generated %s. Back it up: without it, MCP env is lost.", path)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        # Created readable by this user only in one step (no moment with wider permissions), and only if missing:
+        # O_EXCL fails if another process made it first, so two starting together never write different keys.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return path.read_text().strip()
+    # TS: `with` closes the file when the block ends, like `await using` or try/finally.
+    with os.fdopen(fd, "w") as file:
+        file.write(secrets.token_urlsafe(32))
+    log.warning("AGENTSPACE_SECRET_KEY is not set: generated %s. Back it up: without it, MCP env is lost.", path)
     return path.read_text().strip()
