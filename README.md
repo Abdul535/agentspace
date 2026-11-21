@@ -75,6 +75,10 @@ Set in the environment or `apps/api/.env`: `OPENROUTER_API_KEY`, `AGENTSPACE_DEF
 `LANGFUSE_BASE_URL` defaults to the EU cloud, `https://us.cloud.langfuse.com` for the US one). See
 [`config.py`](apps/api/src/agentspace/config.py).
 
+Sign-in (Google through Supabase, ADR-024) is on when `AGENTSPACE_SUPABASE_URL` is set in `apps/api/.env` and
+`NEXT_PUBLIC_SUPABASE_URL` plus `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in `apps/web/.env.local`. Without them the
+app runs in local mode: no login, anyone who reaches the API can use it.
+
 ## Development
 
 ```bash

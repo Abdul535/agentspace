@@ -9,6 +9,7 @@ import { NewSessionButton } from "@/components/new-session-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UserMenu } from "@/components/user-menu";
 import { useArchiveSession, useSessions } from "@/lib/api/queries";
 import { cn } from "@/lib/utils";
 
@@ -124,6 +125,7 @@ export function SessionSidebar() {
           MCP servers
         </Link>
       </div>
+      <UserMenu />
     </aside>
   );
 }

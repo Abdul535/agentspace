@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     """How long one MCP tool call may take."""
     mcp_idle_seconds: float = 600
     """Stop a session's MCP servers after this long without use."""
+    supabase_url: str | None = None
+    """The Supabase project (`https://<ref>.supabase.co`) whose sign-in tokens the API accepts (ADR-024).
+    Unset = local mode: no login, anyone who reaches the API can use it."""
     auto_migrate: bool = True
     """Apply pending Alembic migrations when the app starts."""
 

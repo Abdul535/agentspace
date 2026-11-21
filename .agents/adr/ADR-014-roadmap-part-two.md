@@ -54,7 +54,7 @@ ADR-003 stays as it is for steps 1–25.
     answer, so it needs background runs (step 13, done).
     *pi:* durable's "Gates before a tool runs" (`durable/README.md`).
     *opencode:* `permission.ts`, `permission/`.
-27. [ ] **API auth and Host check.** A token on every API call and a Host /
+27. [x] **API auth and Host check.** A token on every API call and a Host /
     Origin allowlist, so a page in another tab can't drive the API (DNS
     rebinding, ADR-003 step 3). Not in pi (it is local-only); ours is a server.
 28. [ ] **Sandbox.** Run tools in an isolated machine (Daytona; see

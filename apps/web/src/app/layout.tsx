@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
-import { Suspense } from "react";
-
-import { SessionSidebar } from "@/components/session-sidebar";
 
 import "./globals.css";
 import { Providers } from "./providers";
@@ -38,13 +35,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       {/* The 3px yellow stripe across the top is the brand mark (DESIGN.md). */}
       <body className="flex h-dvh overflow-hidden border-t-3 border-t-primary">
-        <Providers>
-          {/* The sidebar reads the active session from the URL, which is only known per request. */}
-          <Suspense fallback={<aside className="w-64 shrink-0 border-r bg-sidebar" />}>
-            <SessionSidebar />
-          </Suspense>
-          <main className="min-w-0 flex-1">{children}</main>
-        </Providers>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
