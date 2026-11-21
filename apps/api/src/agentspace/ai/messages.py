@@ -92,14 +92,27 @@ class ToolCall(BaseModel):
     """Set when the model's arguments were not a valid JSON object; `arguments` is then `{}`."""
 
 
+class Cost(BaseModel):
+    """What one model reply cost, in US dollars (pi's `Usage.cost`)."""
+
+    input: float = 0
+    output: float = 0
+    total: float = 0
+    """The best figure we have: the provider's billed cost when `from_provider`, else the catalog estimate."""
+    from_provider: bool = False
+    """True when `total` is what the provider billed; False for an estimate, or 0 when the price is unknown."""
+
+
 class Usage(BaseModel):
-    """Token counts the provider reported for one model reply."""
+    """Token counts the provider reported for one model reply, and what it cost."""
 
     input: int = 0
     output: int = 0
     total: int = 0
     reasoning: int = 0
     """Thinking tokens; already counted in `output`, not on top of it."""
+    # Rows saved before costs existed have no `cost`, so they load as $0 rather than failing.
+    cost: Cost = Cost()
 
 
 class UserMessage(BaseModel):

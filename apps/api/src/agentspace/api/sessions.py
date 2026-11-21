@@ -365,6 +365,8 @@ async def stream_run(
             max_turns=settings.max_turns,
             max_tokens=settings.max_output_tokens,
             thinking_level=session.thinking_level,
+            # Prices each reply when OpenRouter doesn't bill it; an unknown model's replies cost $0.
+            price=info.price() if info else None,
             # Messages the user queues during the run (`POST .../steer`, `.../follow-up`).
             config=LoopConfig(
                 get_steering_messages=run.active.take_steering,

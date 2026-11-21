@@ -1109,7 +1109,13 @@
               "input": 0,
               "output": 0,
               "total": 0,
-              "reasoning": 0
+              "reasoning": 0,
+              "cost": {
+                "from_provider": false,
+                "input": 0.0,
+                "output": 0.0,
+                "total": 0.0
+              }
             }
           },
           "stop_reason": {
@@ -1230,6 +1236,33 @@
         ],
         "title": "CompactionSummaryMessage",
         "description": "A summary standing in for the older part of the transcript, so it fits the model's window (ADR-009)."
+      },
+      "Cost": {
+        "properties": {
+          "input": {
+            "type": "number",
+            "title": "Input",
+            "default": 0
+          },
+          "output": {
+            "type": "number",
+            "title": "Output",
+            "default": 0
+          },
+          "total": {
+            "type": "number",
+            "title": "Total",
+            "default": 0
+          },
+          "from_provider": {
+            "type": "boolean",
+            "title": "From Provider",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "Cost",
+        "description": "What one model reply cost, in US dollars (pi's `Usage.cost`)."
       },
       "EndReason": {
         "type": "string",
@@ -2673,11 +2706,20 @@
             "type": "integer",
             "title": "Reasoning",
             "default": 0
+          },
+          "cost": {
+            "$ref": "#/components/schemas/Cost",
+            "default": {
+              "input": 0.0,
+              "output": 0.0,
+              "total": 0.0,
+              "from_provider": false
+            }
           }
         },
         "type": "object",
         "title": "Usage",
-        "description": "Token counts the provider reported for one model reply."
+        "description": "Token counts the provider reported for one model reply, and what it cost."
       },
       "UserContent": {
         "oneOf": [

@@ -3,12 +3,22 @@ import json
 import httpx
 import pytest
 
-from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall, ToolResultMessage, UserMessage, joined_text
+from agentspace.ai.messages import (
+    AssistantMessage,
+    Cost,
+    TextContent,
+    ToolCall,
+    ToolResultMessage,
+    Usage,
+    UserMessage,
+    joined_text,
+)
 from agentspace.ai.provider import (
     INTERRUPTED_TOOL_RESULT,
     Context,
     DoneEvent,
     ErrorEvent,
+    Price,
     TextDeltaEvent,
     ToolCallEndEvent,
     ToolSpec,
@@ -160,3 +170,52 @@ def test_prepare_transcript_repairs_interrupted_runs() -> None:
     assert isinstance(stand_in, ToolResultMessage)
     assert stand_in.tool_call_id == "c1" and stand_in.is_error
     assert joined_text(stand_in.content) == INTERRUPTED_TOOL_RESULT
+
+
+async def usage_from(usage: dict, price: Price | None = None) -> Usage:
+    """The `Usage` the adapter builds from a final chunk carrying `usage`."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = sse(
+            {"choices": [{"delta": {"content": "hi"}, "finish_reason": "stop"}]}, {"choices": [], "usage": usage}
+        )
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    events = await collect(provider(handler), Context(messages=[UserMessage(content="hi")], price=price))
+    assert isinstance(events[-1], DoneEvent)
+    return events[-1].message.usage
+
+
+TOKENS = {"prompt_tokens": 1000, "completion_tokens": 200, "total_tokens": 1200}
+
+
+async def test_estimates_cost_from_the_catalog_price() -> None:
+    usage = await usage_from(TOKENS, Price(input=3, output=15))
+    # 1000 × $3/M + 200 × $15/M
+    assert usage.cost == Cost(input=0.003, output=0.003, total=0.006, from_provider=False)
+
+
+async def test_prefers_openrouters_billed_cost() -> None:
+    billed = {
+        "cost": 0.00435,
+        "is_byok": False,
+        "cost_details": {"upstream_inference_prompt_cost": 0.00135, "upstream_inference_completions_cost": 0.003},
+    }
+    usage = await usage_from(TOKENS | billed, Price(input=3, output=15))
+    assert usage.cost == Cost(input=0.00135, output=0.003, total=0.00435, from_provider=True)
+
+
+async def test_byok_adds_the_upstream_cost_to_openrouters_fee() -> None:
+    billed = {"cost": 0.0002, "is_byok": True, "cost_details": {"upstream_inference_cost": 0.004}}
+    usage = await usage_from(TOKENS | billed)
+    assert usage.cost.total == pytest.approx(0.0042) and usage.cost.from_provider
+
+
+async def test_a_bad_billed_cost_falls_back_to_the_estimate() -> None:
+    for bad in ({"cost": None}, {"cost": -1}, {"cost": True}, {"cost": 0.1, "is_byok": True}):
+        usage = await usage_from(TOKENS | bad, Price(input=3, output=15))
+        assert usage.cost.total == pytest.approx(0.006) and not usage.cost.from_provider
+
+
+async def test_no_price_and_no_bill_costs_nothing() -> None:
+    assert (await usage_from(TOKENS)).cost == Cost()

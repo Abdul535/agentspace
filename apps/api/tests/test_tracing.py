@@ -14,7 +14,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from agentspace.agent.events import AgentEndEvent, MessageEndEvent, MessageStartEvent, ToolExecutionStartEvent
-from agentspace.ai.messages import AssistantMessage, TextContent, ToolCall, Usage, UserMessage
+from agentspace.ai.messages import AssistantMessage, Cost, TextContent, ToolCall, Usage, UserMessage
 from agentspace.ai.provider import AssistantEvent, Context, DoneEvent, StartEvent, TextDeltaEvent
 from agentspace.api.deps import provider_lookup
 from agentspace.config import Settings
@@ -41,7 +41,7 @@ class ToolThenAnswer:
         else:
             yield TextDeltaEvent(delta="done")
             content, stop = [TextContent(text="done")], "stop"
-        usage = Usage(input=10, output=4, total=14)
+        usage = Usage(input=10, output=4, total=14, cost=Cost(input=0.001, output=0.002, total=0.003))
         yield DoneEvent(
             message=AssistantMessage(provider=self.name, model=model, content=content, usage=usage, stop_reason=stop)
         )
@@ -101,6 +101,8 @@ def test_a_run_traces_its_model_calls_and_tool_calls_under_one_root(
 
     first, second = sorted((s for s in finished if s.name == "model"), key=lambda s: s.start_time or 0)
     assert attr(first, "usage_details") == {"input": 10, "output": 4, "total": 14}
+    # Our own cost, so Langfuse doesn't guess one from its price table.
+    assert attr(first, "cost_details") == {"total": 0.003, "input": 0.001, "output": 0.002}
     assert attr(first, "metadata.stop_reason") == "tool_use"
     # The second call was sent the system prompt and the tool result; its streamed text marks time to first token.
     sent = attr(second, "input")

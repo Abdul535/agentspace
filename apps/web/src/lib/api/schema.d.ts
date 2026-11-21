@@ -410,7 +410,13 @@ export interface components {
              *       "input": 0,
              *       "output": 0,
              *       "total": 0,
-             *       "reasoning": 0
+             *       "reasoning": 0,
+             *       "cost": {
+             *         "from_provider": false,
+             *         "input": 0,
+             *         "output": 0,
+             *         "total": 0
+             *       }
              *     }
              */
             usage: components["schemas"]["Usage"];
@@ -467,6 +473,32 @@ export interface components {
             tokens_before: number;
             /** Timestamp */
             timestamp?: number;
+        };
+        /**
+         * Cost
+         * @description What one model reply cost, in US dollars (pi's `Usage.cost`).
+         */
+        Cost: {
+            /**
+             * Input
+             * @default 0
+             */
+            input: number;
+            /**
+             * Output
+             * @default 0
+             */
+            output: number;
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * From Provider
+             * @default false
+             */
+            from_provider: boolean;
         };
         /** @enum {string} */
         EndReason: "done" | "max_turns" | "error" | "aborted" | "terminated" | "finish_turn";
@@ -1133,7 +1165,7 @@ export interface components {
         };
         /**
          * Usage
-         * @description Token counts the provider reported for one model reply.
+         * @description Token counts the provider reported for one model reply, and what it cost.
          */
         Usage: {
             /**
@@ -1156,6 +1188,15 @@ export interface components {
              * @default 0
              */
             reasoning: number;
+            /**
+             * @default {
+             *       "input": 0,
+             *       "output": 0,
+             *       "total": 0,
+             *       "from_provider": false
+             *     }
+             */
+            cost: components["schemas"]["Cost"];
         };
         UserContent: components["schemas"]["TextContent"] | components["schemas"]["ImageContent"];
         /**

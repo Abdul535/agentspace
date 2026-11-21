@@ -9,7 +9,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agentspace.ai.catalog import CACHE_SECONDS, CatalogError, OpenRouterCatalog
-from agentspace.api.deps import get_catalog
+from agentspace.ai.provider import Price
+from agentspace.ai.providers.fake import FakeProvider, text_reply
+from agentspace.api.deps import get_catalog, provider_lookup
 from agentspace.config import Settings
 from agentspace.main import create_app
 
@@ -105,3 +107,19 @@ def test_models_route_is_502_when_openrouter_is_down(client: TestClient) -> None
         lambda request: httpx.Response(503)
     )
     assert client.get("/models").status_code == 502
+
+
+@pytest.mark.anyio
+async def test_price_is_set_only_when_both_sides_are_known() -> None:
+    models = await catalog_with(lambda request: httpx.Response(200, json=OPENROUTER_MODELS)).models()
+    auto, zeta = models
+    assert zeta.price() == Price(input=3, output=15)
+    assert auto.price() is None  # a router's price varies per request
+
+
+def test_a_run_sends_its_models_catalog_price_with_the_request(client: TestClient) -> None:
+    fake = FakeProvider([text_reply("hi")])
+    cast(FastAPI, client.app).dependency_overrides[provider_lookup] = lambda: lambda name: fake
+    session_id = client.post("/sessions", json={"model": "zeta/tools"}).json()["id"]
+    assert client.post(f"/sessions/{session_id}/messages", json={"content": "hello"}).status_code == 200
+    assert fake.contexts[0].price == Price(input=3, output=15)

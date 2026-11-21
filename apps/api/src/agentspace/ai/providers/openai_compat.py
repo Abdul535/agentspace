@@ -6,12 +6,13 @@ no vendor SDK. Modeled on pi's `packages/ai/src/api/openai-completions.ts`.
 
 import json
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, TypeIs
 
 import httpx
 
 from agentspace.ai.messages import (
     AssistantMessage,
+    Cost,
     ImageContent,
     Message,
     StopReason,
@@ -30,6 +31,7 @@ from agentspace.ai.provider import (
     Context,
     DoneEvent,
     ErrorEvent,
+    Price,
     StartEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
@@ -142,12 +144,7 @@ class OpenAICompatProvider:
                         if error := chunk.get("error"):  # TS: const error = chunk.error; if (error) {...}
                             raise ProviderError(error.get("message") or json.dumps(error))
                         if usage := chunk.get("usage"):
-                            output.usage = Usage(
-                                input=usage.get("prompt_tokens") or 0,  # TS: `or` acts like `||`, not `??`
-                                output=usage.get("completion_tokens") or 0,
-                                total=usage.get("total_tokens") or 0,
-                                reasoning=(usage.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0,
-                            )
+                            output.usage = parse_usage(usage, context.price)
                         for choice in chunk.get("choices") or []:
                             delta = choice.get("delta") or {}
                             # Read before `content`: a proxy can put reasoning and answer in one chunk.
@@ -355,3 +352,62 @@ def wire_user_content(content: str | list[UserContent]) -> str | list[dict[str, 
 def image_part(image: ImageContent) -> dict[str, Any]:
     """An image as a Chat Completions `image_url` part with a `data:` URL."""
     return {"type": "image_url", "image_url": {"url": f"data:{image.mime_type};base64,{image.data}"}}
+
+
+def parse_usage(raw: dict[str, Any], price: Price | None) -> Usage:
+    """The final chunk's `usage` as ours: tokens, a catalog estimate, then OpenRouter's billed cost if it sent one."""
+    usage = Usage(
+        input=raw.get("prompt_tokens") or 0,  # TS: `or` acts like `||`, not `??`
+        output=raw.get("completion_tokens") or 0,
+        total=raw.get("total_tokens") or 0,
+        reasoning=(raw.get("completion_tokens_details") or {}).get("reasoning_tokens") or 0,
+    )
+    if price:
+        usage.cost = estimate_cost(usage, price)
+    if billed := billed_cost(raw):
+        usage.cost = billed
+    return usage
+
+
+def estimate_cost(usage: Usage, price: Price) -> Cost:
+    """Tokens times the list price (pi's `calculateCost`); cached tokens aren't split out until step 36."""
+    input_cost = usage.input * price.input / 1_000_000
+    output_cost = usage.output * price.output / 1_000_000
+    return Cost(input=input_cost, output=output_cost, total=input_cost + output_cost)
+
+
+# TS: `TypeIs[float]` is a type guard, like `(value: unknown): value is number`.
+def is_cost(value: object) -> TypeIs[float]:
+    """A usable dollar amount: a finite number, not negative (bool is excluded, though Python counts it as an int)."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and 0 <= value < float("inf")
+
+
+def billed_cost(raw: dict[str, Any]) -> Cost | None:
+    """What OpenRouter charged for the reply, from `usage.cost`; None when it sent no valid figure (pi's
+    `applyOpenRouterReportedCost`).
+
+    With the user's own provider key (BYOK), `cost` is only OpenRouter's fee: the provider bills the
+    tokens itself, reported as `cost_details.upstream_inference_cost`, so the two are added up.
+    """
+    cost = raw.get("cost")
+    if not is_cost(cost):
+        return None
+    details = raw.get("cost_details") or {}
+    prompt = details.get("upstream_inference_prompt_cost")
+    completion = details.get("upstream_inference_completions_cost")
+    # The split is only for display; when it's missing or doesn't add up, input/output stay 0.
+    split = is_cost(prompt) and is_cost(completion)
+    total = cost
+    if raw.get("is_byok") is True:
+        upstream = details.get("upstream_inference_cost")
+        if upstream is None and split:
+            upstream = prompt + completion
+        if not is_cost(upstream):
+            return None
+        total = cost + upstream
+    return Cost(
+        input=prompt if split else 0,
+        output=completion if split else 0,
+        total=total,
+        from_provider=True,
+    )
