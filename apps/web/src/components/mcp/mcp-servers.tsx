@@ -188,7 +188,7 @@ function TestResult({ result }: { result: NonNullable<ReturnType<typeof useTestM
   return (
     <div className="flex flex-col gap-2 rounded-lg bg-muted/50 p-3">
       <span className="flex items-center gap-1.5 text-sm font-medium">
-        <CircleCheck className="size-4 text-emerald-600" />
+        <CircleCheck className="size-4 text-success" />
         Connected{result.server_name && ` to ${result.server_name}`}
         {result.server_version && <span className="text-muted-foreground"> {result.server_version}</span>}
         <span className="text-muted-foreground tabular-nums">
