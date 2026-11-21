@@ -7,6 +7,7 @@ import { imageOutline } from "@/components/chat/image-thumbnails";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { QueuedMessage, QueueKind } from "@/lib/api/use-agent-run";
 import { cn } from "@/lib/utils";
 
@@ -22,6 +23,13 @@ function readAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error);
     reader.readAsDataURL(file);
   });
+}
+
+// What the attach button's tooltip says: what it does, or why it's off right now.
+function attachHint(canAttach: boolean, running: boolean): string {
+  if (!canAttach) return "This model can't see images. Pick one that can in the model menu.";
+  if (running) return "Images go with your next prompt. Wait for this run to finish.";
+  return "Attach images (or paste or drop them)";
 }
 
 /**
@@ -168,22 +176,27 @@ export function Composer({
           className="max-h-60 resize-none pr-24"
           autoFocus
         />
-        {/* A span keeps the tooltip working: a disabled button gets no hover events. */}
-        <span
-          className="absolute right-12 bottom-2"
-          title={canAttach ? "Attach images" : "This model can't see images"}
-        >
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            disabled={!attachable}
-            onClick={() => fileInput.current?.click()}
-            aria-label="Attach images"
-          >
-            <ImagePlus />
-          </Button>
-        </span>
+        <Tooltip>
+          {/* A span keeps the tooltip working: a disabled button gets no hover events. */}
+          <TooltipTrigger asChild>
+            <span className="absolute right-12 bottom-2" tabIndex={attachable ? undefined : 0}>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                disabled={!attachable}
+                onClick={() => fileInput.current?.click()}
+                aria-label="Attach images"
+                aria-describedby={attachable ? undefined : "attach-disabled-reason"}
+              >
+                <ImagePlus />
+              </Button>
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top" id={attachable ? undefined : "attach-disabled-reason"}>
+            {attachHint(canAttach, running)}
+          </TooltipContent>
+        </Tooltip>
         {running ? (
           <Button
             type="button"
