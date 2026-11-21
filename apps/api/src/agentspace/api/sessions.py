@@ -1,4 +1,4 @@
-"""HTTP routes for sessions: create, list, read, change settings, prompt, continue, compact, watch, steer or stop."""
+"""HTTP routes for sessions: create, list, read, change, archive, prompt, continue, compact, watch, steer or stop."""
 
 import base64
 import binascii
@@ -195,6 +195,15 @@ async def update_session(body: SessionUpdate, session: SessionRowDep, store: Sto
         await store.set_thinking_level(session, body.thinking_level)
         await store.append(session, NoticeMessage(text=f"Switched thinking from {previous} to {body.thinking_level}"))
     return public(session, runs)
+
+
+@router.post("/{session_id}/archive", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_session(session: SessionRowDep, store: StoreDep, runs: RunsDep) -> None:
+    """Hide the session from the list; its transcript is kept. 409 while a run is in progress."""
+    # A run hidden from the sidebar would keep working where nobody can see or stop it.
+    if runs.is_running(session.id):
+        raise HTTPException(status.HTTP_409_CONFLICT, "Wait for the current run to finish before archiving.")
+    await store.archive(session)
 
 
 def no_transform(response: Response) -> None:

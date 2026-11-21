@@ -120,8 +120,14 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
     setState({ ...idle, running: true });
 
     let error: string | null = null;
+    let started = false;
     try {
       for await (const event of open(abort.signal)) {
+        // The server has claimed the run by its first event: refresh the sidebar so its spinner shows now.
+        if (!started) {
+          started = true;
+          void queryClient.invalidateQueries({ queryKey: queryKeys.sessions, exact: true });
+        }
         // A queued message the agent picked up comes back as a user `message_end`: it's no longer queued.
         if (event.type === "message_end" && event.message.role === "user") {
           const content = event.message.content;

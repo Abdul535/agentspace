@@ -57,6 +57,20 @@ def test_create_list_and_get_session(client: TestClient) -> None:
     assert detail["messages"] == [] and detail["running"] is False
 
 
+def test_archiving_hides_a_session_but_not_while_it_runs(client: TestClient) -> None:
+    kept, archived = (client.post("/sessions", json={}).json()["id"] for _ in range(2))
+    assert client.post("/sessions/nope/archive").status_code == 404
+
+    mark_running(client, archived)
+    assert client.post(f"/sessions/{archived}/archive").status_code == 409
+    del cast(FastAPI, client.app).state.runs.runs[archived]
+
+    assert client.post(f"/sessions/{archived}/archive").status_code == 204
+    assert [s["id"] for s in client.get("/sessions").json()] == [kept]
+    # The transcript is kept: the session still opens by its link.
+    assert client.get(f"/sessions/{archived}").status_code == 200
+
+
 def test_unknown_session_and_provider(client: TestClient) -> None:
     assert client.get("/sessions/nope").status_code == 404
     assert client.post("/sessions/nope/messages", json={"content": "hi"}).status_code == 404
