@@ -3,6 +3,7 @@
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from urllib.parse import urlsplit
 
 from asyncer import asyncify
 from fastapi import Depends, FastAPI
@@ -65,8 +66,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             await redis.ping()
         except RedisConnectionError as exc:
+            # Host and port only: a production URL carries the password.
+            url = urlsplit(settings.redis_url)
+            where = f"{url.hostname}:{url.port or 6379}"
             raise RuntimeError(
-                f"No Redis at {settings.redis_url}. Locally, `bash scripts/db.sh` (or `pnpm dev:api`) starts it."
+                f"No Redis at {where}. Locally, `bash scripts/db.sh` (or `pnpm dev:api`) starts it."
             ) from exc
         # Every session's background run (ADR-007), on whichever server drives it (ADR-029).
         app.state.runs = RunManager(
