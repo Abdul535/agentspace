@@ -34,7 +34,7 @@ from agentspace.agent.loop import Emit
 from agentspace.agent.messages import AgentMessage
 from agentspace.ai.messages import AssistantMessage, TextContent, ThinkingContent, UserMessage
 from agentspace.ai.provider import TextDeltaEvent, ThinkingDeltaEvent, ToolCallEndEvent
-from agentspace.session.models import SessionRow
+from agentspace.session.models import LOCAL_USER_ID, SessionRow
 from agentspace.session.store import SessionStore
 from agentspace.tracing import RunTrace, Tracer
 
@@ -89,6 +89,14 @@ class SessionBusyError(Exception):
     """The session already has a run."""
 
 
+class TooManyRunsError(Exception):
+    """The user already has as many runs going as they may (ADR-026)."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(limit)
+        self.limit = limit
+
+
 # TS: @dataclass writes the constructor from the fields; eq=False keeps identity equality, so it can sit in a set.
 @dataclass(eq=False)
 class ActiveRun:
@@ -98,6 +106,8 @@ class ActiveRun:
     messages: list[AgentMessage]
     """History at start plus every message the run has finished."""
     history_size: int
+    user_id: str = LOCAL_USER_ID
+    """Who owns the session; their runs at once are capped (ADR-026)."""
     # TS: `field(default_factory=...)` gives each instance a fresh value; a plain `= set()` would be shared.
     subscribers: set[Subscriber] = field(default_factory=set)
     streaming: AssistantMessage | None = None
@@ -217,11 +227,18 @@ async def read_events(run: ActiveRun, queue: Subscriber) -> AsyncGenerator[Agent
 
 
 class RunManager:
-    """Owns every running session's task; at most one run per session."""
+    """Owns every running session's task; at most one run per session, and `max_per_user` per user."""
 
-    def __init__(self, db_factory: async_sessionmaker[AsyncSession], tracer: Tracer | None = None) -> None:
+    def __init__(
+        self,
+        db_factory: async_sessionmaker[AsyncSession],
+        tracer: Tracer | None = None,
+        max_per_user: int | None = None,
+    ) -> None:
         self.db_factory = db_factory
         self.tracer = tracer or Tracer(None)
+        self.max_per_user = max_per_user
+        """`None` = no cap."""
         self.runs: dict[str, ActiveRun] = {}
         # Held from "is it free?" through loading history to registering the run, so two prompts can't both pass.
         self.claim_lock = asyncio.Lock()
@@ -234,15 +251,27 @@ class RunManager:
         """Whether the session has a run (claimed or started)."""
         return session_id in self.runs
 
-    async def claim(self, session_id: str, load_history: Callable[[], Awaitable[list[AgentMessage]]]) -> ActiveRun:
-        """Take the session's run slot and load its history; raises `SessionBusyError` if it's taken."""
+    async def claim(
+        self,
+        session_id: str,
+        load_history: Callable[[], Awaitable[list[AgentMessage]]],
+        user_id: str = LOCAL_USER_ID,
+    ) -> ActiveRun:
+        """Take the session's run slot and load its history.
+
+        Raises `SessionBusyError` if the slot is taken, `TooManyRunsError` if the user is at their cap.
+        """
         # TS: `async with lock` is acquire + try/finally release, like `await using`.
         async with self.claim_lock:
             if session_id in self.runs:
                 raise SessionBusyError(session_id)
+            # Counted under the lock, so two prompts sent together can't both take the last slot.
+            mine = sum(1 for run in self.runs.values() if run.user_id == user_id)
+            if self.max_per_user is not None and mine >= self.max_per_user:
+                raise TooManyRunsError(self.max_per_user)
             # Loaded under the lock: no run can be active now, so this is the full transcript.
             history = await load_history()
-            run = ActiveRun(session_id=session_id, messages=list(history), history_size=len(history))
+            run = ActiveRun(session_id=session_id, messages=list(history), history_size=len(history), user_id=user_id)
             self.runs[session_id] = run
             return run
 

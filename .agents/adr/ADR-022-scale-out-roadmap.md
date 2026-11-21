@@ -77,7 +77,7 @@ After A the app can be public, on one Fargate task, with `bash` and stdio MCP
     by it: another user's session is a 404, never a 403, so its existence leaks
     nothing. Decide whether skills are global read-only or per user. Encrypt
     MCP `env` values at rest (they hold users' secrets).
-57. [ ] **Limits per user (ADR).** At most N concurrent runs per user, a daily
+57. [x] **Limits per user (ADR-026: BYOK for everyone, max runs at once).** At most N concurrent runs per user, a daily
     spend cap from the cost we already store (ADR-019), and request rate limits.
     Decide: our OpenRouter key with caps, or users bring their own key, or both.
     The UI says when and why a limit was hit and when it resets.

@@ -67,6 +67,7 @@ class OpenAICompatProvider:
         base_url: str,
         api_key: str | None,
         headers: dict[str, str] | None = None,
+        error_hints: dict[int, str] | None = None,
         timeout: httpx.Timeout = DEFAULT_TIMEOUT,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
@@ -75,6 +76,8 @@ class OpenAICompatProvider:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.headers = headers or {}
+        # What to tell the user for an HTTP status they can fix themselves, e.g. a refused key.
+        self.error_hints = error_hints or {}
         self.timeout = timeout
         self.transport = transport
 
@@ -134,7 +137,10 @@ class OpenAICompatProvider:
                 ) as response:
                     if response.status_code >= 400:
                         detail = (await response.aread()).decode(errors="replace")
-                        raise ProviderError(f"HTTP {response.status_code}: {error_detail(detail)}")
+                        message = f"HTTP {response.status_code}: {error_detail(detail)}"
+                        if hint := self.error_hints.get(response.status_code):
+                            message = f"{hint} ({message})"
+                        raise ProviderError(message)
                     # TS: for await (const data of sseData(response))
                     async for data in sse_data(response):
                         if data == "[DONE]":

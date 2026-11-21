@@ -11,12 +11,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.ai.provider import Provider
-from agentspace.ai.providers import UnknownProviderError, get_provider
+from agentspace.ai.providers import PROVIDER_LABELS, MissingApiKeyError, UnknownProviderError, get_provider
 from agentspace.auth import AuthUser, require_user
 from agentspace.config import Settings
-from agentspace.encryption import SecretBox
-from agentspace.runs import ActiveRun, RunManager, SessionBusyError
+from agentspace.encryption import SecretBox, SecretError
+from agentspace.runs import ActiveRun, RunManager, SessionBusyError, TooManyRunsError
 from agentspace.session.db import open_db
+from agentspace.session.keys import list_keys
 from agentspace.session.models import LOCAL_USER_ID, SessionRow, UserRow
 from agentspace.session.store import SessionStore
 
@@ -75,14 +76,6 @@ def get_store(db: DBDep, user: UserDep) -> SessionStore:
 StoreDep = Annotated[SessionStore, Depends(get_store)]
 
 
-def provider_lookup(settings: SettingsDep) -> Callable[[str], Provider]:
-    """Builds a provider by name. Tests override this dependency to inject a fake provider."""
-    return lambda name: get_provider(name, settings)
-
-
-ProviderLookupDep = Annotated[Callable[[str], Provider], Depends(provider_lookup)]
-
-
 def get_catalog(request: Request) -> OpenRouterCatalog:
     """The app-wide model catalog, so its cache is shared by every request. Tests override this."""
     return request.app.state.model_catalog
@@ -108,6 +101,31 @@ def get_secret_box(request: Request) -> SecretBox:
 
 
 SecretBoxDep = Annotated[SecretBox, Depends(get_secret_box)]
+
+
+async def provider_lookup(
+    settings: SettingsDep, db: DBDep, user: UserDep, box: SecretBoxDep
+) -> Callable[[str], Provider]:
+    """Builds a provider by name with the caller's own key for it (ADR-026). Tests override this to inject a fake.
+
+    Raises `MissingApiKeyError` when no key is saved, `SecretError` when the saved one can't be decrypted.
+    """
+    rows = {row.provider: row for row in await list_keys(db, user.id)}
+
+    def lookup(name: str) -> Provider:
+        """The provider, built with the user's key for it."""
+        row = rows.get(name)
+        return get_provider(name, settings, box.decrypt(user.id, row.api_key) if row else None)
+
+    return lookup
+
+
+ProviderLookupDep = Annotated[Callable[[str], Provider], Depends(provider_lookup)]
+
+
+def refusal(code: str, message: str) -> dict[str, str]:
+    """An error body with a code the web app can act on (e.g. link to the key settings) and the text to show."""
+    return {"code": code, "message": message}
 
 
 def get_runs(request: Request) -> RunManager:
@@ -141,11 +159,28 @@ async def claim_run(
     except UnknownProviderError as exc:
         # TS: `raise ... from exc` is `throw new Error(msg, { cause: exc })`.
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+    except MissingApiKeyError as exc:
+        label = PROVIDER_LABELS.get(session.provider, session.provider)
+        detail = refusal("no_api_key", f"Add your {label} API key in Settings → API keys to start.")
+        raise HTTPException(status.HTTP_409_CONFLICT, detail) from exc
+    except SecretError as exc:
+        label = PROVIDER_LABELS.get(session.provider, session.provider)
+        detail = refusal(
+            "no_api_key", f"Your saved {label} key can't be read any more. Add it again in Settings → API keys."
+        )
+        raise HTTPException(status.HTTP_409_CONFLICT, detail) from exc
     try:
-        active = await runs.claim(session.id, lambda: store.messages(session.id))
+        active = await runs.claim(session.id, lambda: store.messages(session.id), session.user_id)
     except SessionBusyError as exc:
         # TS: raising HTTPException ends the request with that status, like `throw new HTTPException(409)` in Hono.
         raise HTTPException(status.HTTP_409_CONFLICT, "This session is already running a prompt.") from exc
+    except TooManyRunsError as exc:
+        detail = refusal(
+            "too_many_runs",
+            f"You already have {exc.limit} sessions running, the most at once. "
+            "Wait for one to finish or stop one, then send again.",
+        )
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail) from exc
     try:
         yield Run(session=session, provider=provider, workspace=settings.workspaces_dir / session.id, active=active)
     finally:

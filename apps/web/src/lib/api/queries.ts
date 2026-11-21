@@ -19,6 +19,7 @@ export const queryKeys = {
   skills: ["skills"] as const,
   skill: (name: string) => ["skills", name] as const,
   mcpServers: ["mcp-servers"] as const,
+  providerKeys: ["provider-keys"] as const,
 };
 
 // The sidebar's session list; polled so a run started or finished elsewhere shows up, faster while one runs.
@@ -219,5 +220,45 @@ export function useTestMcpServer() {
       if (error) throw new Error(errorMessage(error));
       return data;
     },
+  });
+}
+
+// Each provider and whether the user has saved their own key for it (ADR-026).
+export function useProviderKeys() {
+  return useQuery({
+    queryKey: queryKeys.providerKeys,
+    queryFn: async () => {
+      const { data, error } = await api.GET("/provider-keys");
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
+  });
+}
+
+// Checks a key with its provider and saves it; a key the provider refuses comes back as an error.
+export function useSaveProviderKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ provider, apiKey }: { provider: string; apiKey: string }) => {
+      const { data, error } = await api.PUT("/provider-keys/{provider}", {
+        params: { path: { provider } },
+        body: { api_key: apiKey },
+      });
+      if (error) throw new Error(errorMessage(error));
+      return data;
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.providerKeys }),
+  });
+}
+
+// Removes the user's key; their sessions can't run until they add one again.
+export function useDeleteProviderKey() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (provider: string) => {
+      const { error } = await api.DELETE("/provider-keys/{provider}", { params: { path: { provider } } });
+      if (error) throw new Error(errorMessage(error));
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.providerKeys }),
   });
 }

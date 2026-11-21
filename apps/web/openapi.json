@@ -1090,6 +1090,134 @@
           }
         }
       }
+    },
+    "/provider-keys": {
+      "get": {
+        "tags": [
+          "provider-keys"
+        ],
+        "summary": "List Provider Keys",
+        "description": "Every registered provider, with the caller's saved key for it or none.",
+        "operationId": "list_provider_keys_provider_keys_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderKeyPublic"
+                  },
+                  "type": "array",
+                  "title": "Response List Provider Keys Provider Keys Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/provider-keys/{provider}": {
+      "put": {
+        "tags": [
+          "provider-keys"
+        ],
+        "summary": "Save Provider Key",
+        "description": "Check the key with the provider, then add or replace it. A key the provider refuses is not saved.",
+        "operationId": "save_provider_key_provider_keys__provider__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderKeySave"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderKeySaved"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "provider-keys"
+        ],
+        "summary": "Delete Provider Key",
+        "description": "Remove the caller's key; their sessions can't run until they add one again.",
+        "operationId": "delete_provider_key_provider_keys__provider__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2010,6 +2138,115 @@
         ],
         "title": "PromptCreate",
         "description": "A text message for a run: steering or a follow-up."
+      },
+      "ProviderKeyPublic": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "label",
+          "last4",
+          "updated_at"
+        ],
+        "title": "ProviderKeyPublic",
+        "description": "A provider and the user's key for it, if any; the key itself never leaves the server."
+      },
+      "ProviderKeySave": {
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 8,
+            "title": "Api Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "api_key"
+        ],
+        "title": "ProviderKeySave",
+        "description": "The key to save; surrounding spaces from a paste are trimmed."
+      },
+      "ProviderKeySaved": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "checked": {
+            "type": "boolean",
+            "title": "Checked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "label",
+          "last4",
+          "updated_at",
+          "checked"
+        ],
+        "title": "ProviderKeySaved",
+        "description": "The saved key, and whether the provider confirmed it works."
       },
       "RunSnapshot": {
         "properties": {

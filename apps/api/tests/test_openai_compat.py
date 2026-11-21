@@ -219,3 +219,18 @@ async def test_a_bad_billed_cost_falls_back_to_the_estimate() -> None:
 
 async def test_no_price_and_no_bill_costs_nothing() -> None:
     assert (await usage_from(TOKENS)).cost == Cost()
+
+
+async def test_error_hint_tells_the_user_what_to_fix() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(402, json={"error": {"message": "Insufficient credits"}})
+
+    hinted = OpenAICompatProvider(
+        name="openrouter",
+        base_url="https://example.test/v1",
+        api_key="key",
+        error_hints={402: "Out of credits."},
+        transport=httpx.MockTransport(handler),
+    )
+    events = await collect(hinted)
+    assert events[-1].message.error_message == "Out of credits. (HTTP 402: Insufficient credits)"

@@ -96,3 +96,19 @@ class McpServerRow(SQLModel, table=True):
     enabled: bool = True
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
+
+
+class ProviderKeyRow(SQLModel, table=True):
+    """A user's own API key for one model provider; their runs are paid with it (ADR-026)."""
+
+    __tablename__ = "provider_keys"
+
+    user_id: str = Field(foreign_key="users.id", primary_key=True, ondelete="CASCADE")
+    provider: str = Field(primary_key=True)
+    """A name from the provider registry, e.g. `openrouter`."""
+    api_key: str
+    """Encrypted for its user (ADR-025); never sent back to the browser."""
+    last4: str
+    """The key's last four characters, so the settings page can show which key is saved."""
+    created_at: datetime = Field(default_factory=utcnow)
+    updated_at: datetime = Field(default_factory=utcnow)
