@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, usePathname } from "next/navigation";
 
 import { NewSessionButton } from "@/components/new-session-button";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSessions } from "@/lib/api/queries";
 import { cn } from "@/lib/utils";
@@ -16,10 +17,13 @@ export function SessionSidebar() {
   const sessions = useSessions();
 
   return (
-    <aside className="flex w-64 shrink-0 flex-col gap-3 border-r bg-muted/30 p-3">
-      <Link href="/" className="px-2 pt-1 text-sm font-semibold tracking-tight">
-        agentspace
-      </Link>
+    <aside className="flex w-64 shrink-0 flex-col gap-3 border-r bg-sidebar p-3">
+      <div className="flex items-center justify-between">
+        <Link href="/" className="px-2 text-sm font-semibold tracking-tight">
+          agentspace
+        </Link>
+        <ThemeToggle />
+      </div>
       <NewSessionButton className="w-full" />
       <nav className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-1">
         {sessions.isPending &&
@@ -32,8 +36,8 @@ export function SessionSidebar() {
             href={`/sessions/${session.id}`}
             aria-current={session.id === activeId ? "page" : undefined}
             className={cn(
-              "truncate rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-              "aria-[current=page]:bg-muted aria-[current=page]:text-foreground",
+              "truncate rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+              "aria-[current=page]:bg-accent aria-[current=page]:text-foreground aria-[current=page]:shadow-[inset_2px_0_0_var(--primary)]",
             )}
           >
             {session.title ?? "Untitled session"}
@@ -46,8 +50,8 @@ export function SessionSidebar() {
           href="/skills"
           aria-current={onSkills ? "page" : undefined}
           className={cn(
-            "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-            "aria-[current=page]:bg-muted aria-[current=page]:text-foreground",
+            "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "aria-[current=page]:bg-accent aria-[current=page]:text-foreground aria-[current=page]:shadow-[inset_2px_0_0_var(--primary)]",
           )}
         >
           <BookOpen className="size-4" strokeWidth={1.5} />
@@ -57,8 +61,8 @@ export function SessionSidebar() {
           href="/mcp"
           aria-current={pathname === "/mcp" ? "page" : undefined}
           className={cn(
-            "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground",
-            "aria-[current=page]:bg-muted aria-[current=page]:text-foreground",
+            "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "aria-[current=page]:bg-accent aria-[current=page]:text-foreground aria-[current=page]:shadow-[inset_2px_0_0_var(--primary)]",
           )}
         >
           <Plug className="size-4" strokeWidth={1.5} />

@@ -17,6 +17,9 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// Runs in <head> before first paint: dark is the default, so only a saved "light" choice removes the class.
+const THEME_SCRIPT = `(function(){try{if(localStorage.getItem("theme")==="light")document.documentElement.classList.remove("dark")}catch(e){}})()`;
+
 export const metadata: Metadata = {
   title: "agentspace",
   description: "Run agents, each with its own computer",
@@ -26,12 +29,18 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
+      // The theme script may remove "dark" before React hydrates; keep what it set.
+      suppressHydrationWarning
     >
-      <body className="flex h-dvh overflow-hidden">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
+      {/* The 3px yellow stripe across the top is the brand mark (DESIGN.md). */}
+      <body className="flex h-dvh overflow-hidden border-t-3 border-t-primary">
         <Providers>
           {/* The sidebar reads the active session from the URL, which is only known per request. */}
-          <Suspense fallback={<aside className="w-64 shrink-0 border-r bg-muted/30" />}>
+          <Suspense fallback={<aside className="w-64 shrink-0 border-r bg-sidebar" />}>
             <SessionSidebar />
           </Suspense>
           <main className="min-w-0 flex-1">{children}</main>

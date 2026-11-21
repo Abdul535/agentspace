@@ -32,7 +32,7 @@ export function ActivityPanel({
   const messageCount = entries.length - toolCount;
 
   return (
-    <aside id="activity-panel" className="hidden w-80 shrink-0 flex-col border-l bg-muted/30 lg:flex">
+    <aside id="activity-panel" className="hidden w-80 shrink-0 flex-col border-l bg-sidebar lg:flex">
       <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
         <h2 className="text-sm font-medium">Activity</h2>
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">

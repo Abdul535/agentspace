@@ -24,7 +24,8 @@ export function Chat({ sessionId }: { sessionId: string }) {
   );
   // While attached to a run, its snapshot is the transcript; the fetched one may be missing what it saved since.
   const messages = [...(run.base ?? session.data?.messages ?? []), ...run.messages];
-  const [activityOpen, setActivityOpen] = useState(true);
+  // Closed by default so the chat gets the full width; the header button opens it.
+  const [activityOpen, setActivityOpen] = useState(false);
   const catalog = useModels();
   // A model the catalog doesn't know (or a catalog that's down) may attach; the provider then decides.
   const canAttach = catalog.data?.models.find((m) => m.id === session.data?.model)?.image_input ?? true;
