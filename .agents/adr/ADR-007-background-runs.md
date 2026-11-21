@@ -1,6 +1,6 @@
 # ADR-007 — Background runs: the server owns a run; clients subscribe, reconnect and abort
 
-- **Status:** Accepted; superseded in part by ADR-028 (a reconnect resumes from `Last-Event-ID` instead of a fresh snapshot)
+- **Status:** Accepted; superseded in part by ADR-028 (a reconnect resumes from `Last-Event-ID` instead of a fresh snapshot) and by ADR-029 (the run lock, event fan-out, snapshot, stop and queued messages move from process memory to Postgres and Redis)
 - **Date:** 2026-11-19
 - **Deciders:** project owner
 
