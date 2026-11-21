@@ -299,3 +299,25 @@ def test_continue_after_a_stop_answers_the_prompt_without_adding_one(
     assert detail["can_continue"] is False
     assert client.post(f"{url}/continue").status_code == 422
     assert client.get(url).json()["running"] is False  # the refused claim gave its slot back
+
+
+def test_a_streaming_run_holds_no_database_connection_while_the_model_works(
+    client: TestClient, provider: GatedProvider
+) -> None:
+    # Postgres connections are few (ADR-027): a stream that kept one for the whole run would starve other requests.
+    app = cast(FastAPI, client.app)
+    # Titled already, so the prompt commits no title before the stream starts.
+    session_id = client.post("/sessions", json={"title": "Named"}).json()["id"]
+    post = in_background(lambda: client.post(f"/sessions/{session_id}/messages", json={"content": "hi"}))
+    assert provider.waiting.wait(5)
+    watch = in_background(lambda: client.get(f"/sessions/{session_id}/events"))
+    run = app.state.runs.get(session_id)
+    deadline = time.monotonic() + 5
+    while len(run.subscribers) < 2 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert len(run.subscribers) == 2
+
+    assert app.state.db_factory.kw["bind"].pool.checkedout() == 0
+    portal(client).call(provider.gate.set)
+    post["thread"].join(5)
+    watch["thread"].join(5)

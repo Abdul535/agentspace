@@ -40,8 +40,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Before migrating: a migration encrypts the MCP env values saved before ADR-025.
         app.state.secret_box = SecretBox(load_server_secret(settings.secret_key, settings.data_dir))
         if settings.auto_migrate:
-            await asyncify(upgrade_to_head)(settings.resolved_database_url, app.state.secret_box)
-        engine = create_engine(settings.resolved_database_url)
+            await asyncify(upgrade_to_head)(settings.database_url, app.state.secret_box)
+        engine = create_engine(
+            settings.database_url,
+            pool_size=settings.database_pool_size,
+            statement_timeout_ms=settings.database_statement_timeout_ms,
+        )
         # TS: app.state is like Express's app.locals: values every request can reach.
         app.state.settings = settings
         app.state.db_factory = session_factory(engine)

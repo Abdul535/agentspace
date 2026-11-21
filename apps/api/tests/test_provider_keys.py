@@ -1,6 +1,5 @@
 """Users bring their own key (ADR-026): saved checked and encrypted, used by runs, capped runs at once."""
 
-import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 from typing import cast
@@ -9,6 +8,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from pg import db_rows
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 from test_auth import SUPABASE_URL, FixedKeys, auth, make_token
@@ -23,6 +23,7 @@ from agentspace.auth import TokenVerifier
 from agentspace.config import Settings
 from agentspace.main import create_app
 from agentspace.runs import ActiveRun, RunManager, TooManyRunsError
+from agentspace.session.db import create_engine, session_factory
 from agentspace.session.models import UserRow
 
 KEY = "sk-or-v1-0123456789abcdef"
@@ -74,14 +75,13 @@ def test_a_new_user_has_no_key(client: TestClient) -> None:
     assert entry(client, ALICE) == {"provider": "openrouter", "label": "OpenRouter", "last4": None, "updated_at": None}
 
 
-def test_a_saved_key_shows_only_its_last_four_and_is_encrypted(client: TestClient, tmp_path: Path) -> None:
+def test_a_saved_key_shows_only_its_last_four_and_is_encrypted(client: TestClient) -> None:
     saved = client.put("/provider-keys/openrouter", json={"api_key": f"  {KEY}\n"}, headers=ALICE)
     assert saved.status_code == 200
     assert saved.json()["last4"] == "cdef" and saved.json()["checked"] is True
     assert entry(client, ALICE)["last4"] == "cdef"
     assert KEY not in saved.text
-    with sqlite3.connect(tmp_path / "agentspace.db") as db:
-        [(stored,)] = db.execute("SELECT api_key FROM provider_keys").fetchall()
+    [(stored,)] = db_rows("SELECT api_key FROM provider_keys")
     assert stored.startswith("v1:") and KEY not in stored
 
 
@@ -134,10 +134,13 @@ def test_a_run_without_a_key_says_where_to_add_one(client: TestClient) -> None:
 async def test_runs_are_built_with_the_owners_key(client: TestClient) -> None:
     client.put("/provider-keys/openrouter", json={"api_key": KEY}, headers=ALICE)
     app = cast(FastAPI, client.app)
-    async with app.state.db_factory() as db:
+    # Its own engine: asyncpg connections belong to the event loop that opened them, and the app's run on the client's.
+    engine = create_engine(app.state.settings.database_url)
+    async with session_factory(engine)() as db:
         alice = await db.get(UserRow, "alice")
         assert alice is not None
         lookup = await provider_lookup(app.state.settings, db, alice, app.state.secret_box)
+    await engine.dispose()
     provider = lookup("openrouter")
     assert isinstance(provider, OpenAICompatProvider) and provider.api_key == KEY
 

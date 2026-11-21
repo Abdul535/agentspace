@@ -1,4 +1,4 @@
-# Checks every push to dev and every pull request: lint, types, tests and build for the API, the web app and the landing page (ADR-010, ADR-023).
+# Checks every push to dev and every pull request: lint, types, tests and build for the API, the web app and the landing page (ADR-010, ADR-023, ADR-027).
 name: CI
 
 on:
@@ -21,6 +21,21 @@ jobs:
     name: api (ruff, ty, pytest)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The tests make their own databases on it (ADR-027): the same Postgres image local Supabase runs.
+    services:
+      postgres:
+        image: public.ecr.aws/supabase/postgres:17.6.1.167
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      AGENTSPACE_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
     defaults:
       run:
         working-directory: apps/api

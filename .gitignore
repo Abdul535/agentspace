@@ -22,3 +22,7 @@ node_modules/
 
 # Static export of the landing page (ADR-023)
 out/
+
+# Local Supabase CLI state (ADR-027)
+supabase/.temp/
+supabase/.branches/

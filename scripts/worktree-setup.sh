@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepares a new git worktree to run (ADR-011): copies secrets, installs deps, picks free ports.
+# Prepares a new git worktree to run (ADR-011): copies secrets, installs deps, picks free ports, starts the database.
 # T3 runs it when it creates a worktree; it is safe to run again by hand.
 set -euo pipefail
 
@@ -9,7 +9,7 @@ main="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
 cd "$here"
 
 if [ "$here" = "$main" ]; then
-  echo "This is the main checkout: it keeps the default ports (API 8000, web 3000). Nothing to do."
+  echo "This is the main checkout: it keeps the default ports (API 8000, web 3000) and the shared \`postgres\` database."
   exit 0
 fi
 
@@ -48,6 +48,9 @@ export API_URL=http://127.0.0.1:$api
 EOF
 fi
 
+# The shared dev database (ADR-027); without Docker the worktree is still set up, and `pnpm dev:api` says what's missing.
+bash scripts/db.sh || echo "The database isn't ready yet; \`pnpm dev:api\` will say what's missing."
+
 # shellcheck source=/dev/null
 . ./.worktree.env
-echo "Ready: API on http://127.0.0.1:$API_PORT, web on http://localhost:$PORT"
+echo "Ready: API on http://127.0.0.1:$API_PORT, web on http://localhost:$PORT, database ${AGENTSPACE_DATABASE_URL:-shared}"

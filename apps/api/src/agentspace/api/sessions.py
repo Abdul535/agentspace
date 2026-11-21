@@ -32,11 +32,12 @@ from agentspace.ai.messages import (
 )
 from agentspace.ai.overflow import is_context_overflow
 from agentspace.ai.providers import PROVIDERS
-from agentspace.api.deps import CatalogDep, Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
+from agentspace.api.deps import CatalogDep, DBDep, Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
 from agentspace.api.mcp_servers import McpDep, McpServerConfigsDep
 from agentspace.config import Settings
 from agentspace.mcp.manager import McpManager, ServerConfig
 from agentspace.runs import QueueKind, RunManager, RunSnapshot, read_events
+from agentspace.session.db import release
 from agentspace.session.models import SessionRow
 from agentspace.tools import TOOL_SETS, ToolSetName, allows_mcp, build_tools
 
@@ -235,6 +236,8 @@ async def send_message(
     # Untitled sessions take their title from the first prompt.
     if run.session.title is None:
         await store.set_title(run.session, prompt.text()[:80] or "Image")
+    # The stream lasts the whole run; its connection serves other requests meanwhile (ADR-027).
+    await release(store.db)
     async for event in stream_run(run, prompt, settings, runs, model_lookup(run, catalog), mcp, mcp_servers):
         yield event
 
@@ -253,6 +256,7 @@ def continuable(run: RunDep) -> Run:
 @router.post("/{session_id}/continue", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
 async def continue_run(
     run: Annotated[Run, Depends(continuable)],
+    db: DBDep,
     settings: SettingsDep,
     runs: RunsDep,
     catalog: CatalogDep,
@@ -264,6 +268,7 @@ async def continue_run(
     Streams like `POST .../messages`. 409 if a run is going, 422 if the transcript
     is empty or ends with the agent's reply (pi's `agentLoopContinue`).
     """
+    await release(db)
     async for event in stream_run(run, None, settings, runs, model_lookup(run, catalog), mcp, mcp_servers):
         yield event
 
@@ -280,7 +285,7 @@ def compactable(run: RunDep, settings: SettingsDep) -> Run:
 
 @router.post("/{session_id}/compact", response_class=EventSourceResponse, dependencies=[Depends(no_transform)])
 async def compact_session(
-    run: Annotated[Run, Depends(compactable)], settings: SettingsDep, runs: RunsDep
+    run: Annotated[Run, Depends(compactable)], db: DBDep, settings: SettingsDep, runs: RunsDep
 ) -> AsyncIterable[AgentEvent]:
     """Summarize the older part of the transcript now (ADR-009); streams the run's events like `.../continue`.
 
@@ -303,6 +308,7 @@ async def compact_session(
         new = run.active.messages[-1:] if saved else []
         await emit(AgentEndEvent(reason="done" if saved else "error", new_messages=new))
 
+    await release(db)
     queue = runs.start(run.active, loop)
     async for event in read_events(run.active, queue):
         yield event
@@ -445,6 +451,7 @@ async def watch_session(
     if active is None:
         yield RunSnapshot(running=False, messages=await store.messages(session.id))
         return
+    await release(store.db)
     # Snapshot and subscribe with no `await` between them, so no event can fall in the gap.
     snapshot, queue = active.snapshot(), active.subscribe()
     yield snapshot

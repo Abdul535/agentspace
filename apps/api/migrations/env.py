@@ -27,7 +27,7 @@ if config.config_file_name is not None and config.attributes.get("configure_logg
 target_metadata = SQLModel.metadata
 
 # The app passes its URL in; the alembic CLI falls back to the app settings.
-database_url = config.get_main_option("sqlalchemy.url") or get_settings().resolved_database_url
+database_url = config.get_main_option("sqlalchemy.url") or get_settings().database_url
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -60,7 +60,7 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    # Batch mode lets SQLite run ALTER TABLE changes by copying the table.
+    # Batch mode let SQLite run ALTER TABLE by copying the table; on Postgres it runs plain ALTERs.
     context.configure(connection=connection, target_metadata=target_metadata, render_as_batch=True)
 
     with context.begin_transaction():

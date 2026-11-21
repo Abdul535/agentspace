@@ -59,7 +59,7 @@ first, as for every roadmap step.
 After A the app can be public, on one Fargate task, with `bash` and stdio MCP
 **off** (they would run on our server).
 
-55. [ ] **Postgres (ADR).** `uv add asyncpg`; `AGENTSPACE_DATABASE_URL=
+55. [x] **Postgres (ADR-027: everywhere, local Supabase for dev and tests).** `uv add asyncpg`; `AGENTSPACE_DATABASE_URL=
     postgresql+asyncpg://...`. Run the test suite and every migration against
     Postgres. CI gets a Postgres service so tests use what production uses.
     To decide in its ADR: is SQLite kept for local dev and tests, or is Postgres

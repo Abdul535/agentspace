@@ -50,6 +50,13 @@ def map_env(convert) -> None:  # noqa: ANN001  (a function str, str -> str)
             conn.execute(sa.update(mcp_servers).where(mcp_servers.c.id == server_id).values(env=new_env))
 
 
+def name_unique_constraint() -> str:
+    """The name of `UNIQUE (name)` on mcp_servers: Postgres's own (`mcp_servers_name_key`), or NAMING's on SQLite."""
+    # Postgres names an unnamed constraint itself; SQLite reflects it with no name at all.
+    found = sa.inspect(op.get_bind()).get_unique_constraints("mcp_servers")
+    return next((c["name"] for c in found if c["column_names"] == ["name"] and c["name"]), "uq_mcp_servers_name")
+
+
 def upgrade() -> None:
     """Upgrade schema: users own their sessions and MCP servers, and MCP env is encrypted (ADR-025)."""
     op.create_table(
@@ -63,6 +70,7 @@ def upgrade() -> None:
     insert_local = sa.text("INSERT INTO users (id, created_at) VALUES (:id, CURRENT_TIMESTAMP)")
     op.execute(insert_local.bindparams(id=LOCAL_USER_ID))
 
+    old_unique = name_unique_constraint()
     for table in ("sessions", "mcp_servers"):
         with op.batch_alter_table(table, naming_convention=NAMING) as batch_op:
             # The default fills existing rows; it is dropped below so new rows must name their owner.
@@ -73,7 +81,7 @@ def upgrade() -> None:
             batch_op.create_foreign_key(f"fk_{table}_user_id_users", "users", ["user_id"], ["id"], ondelete="CASCADE")
             if table == "mcp_servers":
                 # A name is unique per user now, not across everyone.
-                batch_op.drop_constraint("uq_mcp_servers_name", type_="unique")
+                batch_op.drop_constraint(old_unique, type_="unique")
                 batch_op.create_unique_constraint("uq_mcp_servers_user_id_name", ["user_id", "name"])
         with op.batch_alter_table(table) as batch_op:
             batch_op.alter_column("user_id", server_default=None)
