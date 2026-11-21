@@ -81,5 +81,8 @@ def load_server_secret(secret_key: str | None, data_dir: Path) -> str:
     # TS: `with` closes the file when the block ends, like `await using` or try/finally.
     with os.fdopen(fd, "w") as file:
         file.write(secrets.token_urlsafe(32))
-    log.warning("AGENTSPACE_SECRET_KEY is not set: generated %s. Back it up: without it, MCP env is lost.", path)
+    log.warning(
+        "AGENTSPACE_SECRET_KEY is not set: generated %s. Back it up: without it, saved API keys and MCP env are lost.",
+        path,
+    )
     return path.read_text().strip()

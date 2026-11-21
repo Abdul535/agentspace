@@ -47,6 +47,7 @@ export function Composer({
   onSend,
   onQueue,
   onStop,
+  blockedReason = null,
 }: {
   value: string;
   onChange: (value: string) => void;
@@ -57,12 +58,14 @@ export function Composer({
   onSend: (content: string, images: string[]) => void;
   onQueue: (kind: QueueKind, content: string) => void;
   onStop: () => void;
+  /** Why nothing can be sent right now (e.g. no API key saved), shown on the send button; null when it can. */
+  blockedReason?: string | null;
 }) {
   const [images, setImages] = useState<string[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const attachable = canAttach && !running;
-  const canSend = !running && (value.trim().length > 0 || images.length > 0);
+  const canSend = !running && !blockedReason && (value.trim().length > 0 || images.length > 0);
 
   // Adds the image files among `files`, within the server's count and size limits.
   async function addFiles(files: File[]) {
@@ -83,7 +86,7 @@ export function Composer({
       if (!content) return;
       onQueue(kind, content);
     } else {
-      if (!content && images.length === 0) return;
+      if (blockedReason || (!content && images.length === 0)) return;
       onSend(content, images);
       setImages([]);
       setAttachError(null);
@@ -209,9 +212,24 @@ export function Composer({
             <Square className="fill-current" />
           </Button>
         ) : (
-          <Button type="submit" size="icon" className="absolute right-2 bottom-2" disabled={!canSend} aria-label="Send">
-            <ArrowUp />
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="absolute right-2 bottom-2" tabIndex={blockedReason ? 0 : undefined}>
+                <Button
+                  type="submit"
+                  size="icon"
+                  disabled={!canSend}
+                  aria-label="Send"
+                  aria-describedby={blockedReason ? "send-blocked-reason" : undefined}
+                >
+                  <ArrowUp />
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="top" id={blockedReason ? "send-blocked-reason" : undefined}>
+              {blockedReason ?? (canSend ? "Send (Enter)" : "Type a message or attach an image to send")}
+            </TooltipContent>
+          </Tooltip>
         )}
       </form>
     </div>

@@ -63,7 +63,12 @@ class Settings(BaseSettings):
     auto_migrate: bool = True
     """Apply pending Alembic migrations when the app starts."""
 
+    max_runs_per_user: int = Field(default=3, ge=1)
+    """How many of one user's sessions may run at once (ADR-026)."""
+
     openrouter_api_key: str | None = Field(default=None, validation_alias="OPENROUTER_API_KEY")
+    """Local mode only: copied into the local user's saved keys at startup if they have none (ADR-026).
+    Runs never read it; every user, the local one too, pays with their own saved key."""
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
 
     # Langfuse tracing (ADR-018): off unless both keys are set; the keys come from the project's settings page.

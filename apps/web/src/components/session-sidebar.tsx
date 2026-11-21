@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, BookOpen, LoaderCircle, Plug, Search } from "lucide-react";
+import { Archive, BookOpen, KeyRound, LoaderCircle, Plug, Search } from "lucide-react";
 import Link from "next/link";
 import { useParams, usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -123,6 +123,17 @@ export function SessionSidebar() {
         >
           <Plug className="size-4" strokeWidth={1.5} />
           MCP servers
+        </Link>
+        <Link
+          href="/keys"
+          aria-current={pathname === "/keys" ? "page" : undefined}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "aria-[current=page]:bg-accent aria-[current=page]:text-foreground aria-[current=page]:shadow-[inset_2px_0_0_var(--primary)]",
+          )}
+        >
+          <KeyRound className="size-4" strokeWidth={1.5} />
+          API keys
         </Link>
       </div>
       <UserMenu />

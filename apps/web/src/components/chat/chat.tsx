@@ -1,6 +1,7 @@
 "use client";
 
-import { AlertCircle, FoldVertical, Loader2, PanelRightClose, PanelRightOpen, RotateCw } from "lucide-react";
+import { AlertCircle, FoldVertical, KeyRound, Loader2, PanelRightClose, PanelRightOpen, RotateCw } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { ActivityPanel } from "@/components/chat/activity-panel";
@@ -12,7 +13,7 @@ import { ThinkingPicker } from "@/components/chat/thinking-picker";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useModels, useSession } from "@/lib/api/queries";
+import { useModels, useProviderKeys, useSession } from "@/lib/api/queries";
 import { useAgentRun } from "@/lib/api/use-agent-run";
 
 export function Chat({ sessionId }: { sessionId: string }) {
@@ -29,6 +30,10 @@ export function Chat({ sessionId }: { sessionId: string }) {
   const catalog = useModels();
   // A model the catalog doesn't know (or a catalog that's down) may attach; the provider then decides.
   const canAttach = catalog.data?.models.find((m) => m.id === session.data?.model)?.image_input ?? true;
+  // Runs are paid with the user's own key (ADR-026): with none saved, say so before they type, not after they send.
+  const keys = useProviderKeys();
+  const providerKey = keys.data?.find((k) => k.provider === session.data?.provider);
+  const missingKey = providerKey && providerKey.last4 === null ? providerKey.label : null;
 
   // Keep the newest output in view while it streams, unless the reader scrolled up.
   const scroller = useRef<HTMLDivElement>(null);
@@ -145,8 +150,20 @@ export function Chat({ sessionId }: { sessionId: string }) {
               </Button>
             </div>
           )}
+          {missingKey && (
+            <div className="mb-3 flex items-center justify-between gap-3 border px-3 py-2 text-sm">
+              <span className="flex items-center gap-2 text-pretty text-muted-foreground">
+                <KeyRound className="size-4 shrink-0" />
+                Add your {missingKey} API key to start. Runs are billed to your own {missingKey} account.
+              </span>
+              <Button size="sm" asChild>
+                <Link href="/keys">Add key</Link>
+              </Button>
+            </div>
+          )}
           <Composer
             value={input}
+            blockedReason={missingKey ? `Add your ${missingKey} API key first (API keys, in the sidebar).` : null}
             onChange={setInput}
             running={run.running}
             canAttach={canAttach}

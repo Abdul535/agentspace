@@ -10,6 +10,7 @@ from fastapi import Depends, FastAPI
 from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.api.mcp_servers import router as mcp_router
 from agentspace.api.models import router as models_router
+from agentspace.api.provider_keys import router as provider_keys_router
 from agentspace.api.sessions import router as sessions_router
 from agentspace.api.skills import router as skills_router
 from agentspace.auth import TokenVerifier, require_user
@@ -18,6 +19,7 @@ from agentspace.encryption import SecretBox, load_server_secret
 from agentspace.mcp.manager import McpManager
 from agentspace.runs import RunManager
 from agentspace.session.db import create_engine, session_factory
+from agentspace.session.keys import seed_local_key
 from agentspace.session.migrate import upgrade_to_head
 from agentspace.tracing import Tracer
 
@@ -31,7 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # TS: code before `yield` runs at startup and code after it at shutdown, like a setup that returns a cleanup.
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
-        """Startup: data folder, secret key, migrations, the engine. Shutdown: stop runs, MCP, tracing, the DB."""
+        """Startup: data folder, secret key, migrations, engine, local key. Shutdown: runs, MCP, tracing, the DB."""
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         if app.state.auth is None:
             log.warning("AGENTSPACE_SUPABASE_URL is not set: no login, anyone who reaches the API can use it.")
@@ -43,10 +45,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # TS: app.state is like Express's app.locals: values every request can reach.
         app.state.settings = settings
         app.state.db_factory = session_factory(engine)
+        if app.state.auth is None and settings.openrouter_api_key:
+            # Local mode pays with the local user's own key like everyone else; `.env` only fills it once (ADR-026).
+            async with app.state.db_factory() as db:
+                if await seed_local_key(db, app.state.secret_box, "openrouter", settings.openrouter_api_key):
+                    log.info("Saved OPENROUTER_API_KEY as the local user's OpenRouter key.")
         # Langfuse traces of each run (ADR-018); a no-op without keys.
         tracer = Tracer.from_settings(settings)
         # Every session's background run (ADR-007).
-        app.state.runs = RunManager(app.state.db_factory, tracer)
+        app.state.runs = RunManager(app.state.db_factory, tracer, max_per_user=settings.max_runs_per_user)
         app.state.model_catalog = OpenRouterCatalog(settings.openrouter_base_url)
         # Each session's MCP server processes (ADR-017); a running session's are never stopped as idle.
         app.state.mcp = McpManager(
@@ -78,6 +85,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(models_router, dependencies=signed_in)
     app.include_router(skills_router, dependencies=signed_in)
     app.include_router(mcp_router, dependencies=signed_in)
+    app.include_router(provider_keys_router, dependencies=signed_in)
     return app
 
 

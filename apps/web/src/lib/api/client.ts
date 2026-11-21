@@ -40,12 +40,18 @@ export type McpServer = Schemas["McpServerPublic"];
 export type McpServerCreate = Schemas["McpServerCreate"];
 export type McpServerUpdate = Schemas["McpServerUpdate"];
 export type McpServerTest = Schemas["McpServerTest"];
+// The user's own model API keys, one entry per provider (ADR-026).
+export type ProviderKey = Schemas["ProviderKeyPublic"];
+export type ProviderKeySaved = Schemas["ProviderKeySaved"];
 
 /** Turn an openapi-fetch error body into a readable message. */
 export function errorMessage(error: unknown): string {
   if (error && typeof error === "object" && "detail" in error) {
     const detail = (error as { detail: unknown }).detail;
-    return typeof detail === "string" ? detail : JSON.stringify(detail);
+    if (typeof detail === "string") return detail;
+    // A refusal with a code (ADR-026) carries its text in `message`.
+    if (detail && typeof detail === "object" && "message" in detail) return String(detail.message);
+    return JSON.stringify(detail);
   }
   return error instanceof Error ? error.message : "Request failed";
 }
