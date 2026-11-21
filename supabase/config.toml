@@ -1,6 +1,6 @@
 # Local Supabase for dev and tests (ADR-027): only its Postgres, the same one hosted Supabase runs.
 # `pnpm dev:api` starts it (scripts/db.sh); every checkout shares this one server, each with its own database.
-# Sign-in stays on the hosted project (ADR-024), so auth, the REST API, storage and the rest stay off.
+# Sign-in stays on the hosted project (ADR-024), so auth, the REST API, storage and the rest stay off; Studio is on.
 
 project_id = "agentspace"
 
@@ -24,8 +24,10 @@ enabled = false
 enabled = false
 port = 55321
 
+# Supabase's table viewer: http://localhost:55323. It only reads the `postgres` database, which is the main
+# checkout's; a worktree's own database needs psql or a client such as TablePlus.
 [studio]
-enabled = false
+enabled = true
 port = 55323
 
 [local_smtp]

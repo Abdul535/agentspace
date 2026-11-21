@@ -17,9 +17,9 @@ class Settings(BaseSettings):
 
     data_dir: Path = Path("data")
     """Holds each session's workspace folder, the skills and the generated secret key."""
-    database_url: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:55322/agentspace"
-    """A Postgres URL (ADR-027). The default is the main checkout's database on the local Supabase that
-    `pnpm dev:api` starts; each worktree sets its own in `.worktree.env`."""
+    database_url: str = "postgresql+asyncpg://postgres:postgres@127.0.0.1:55322/postgres"
+    """A Postgres URL (ADR-027). The default is the main checkout's: `postgres`, the one Supabase Studio shows,
+    on the local Supabase that `pnpm dev:api` starts; each worktree sets its own in `.worktree.env`."""
     database_pool_size: int = Field(default=5, ge=1)
     """Connections kept open per API process; up to as many more open when it's busy."""
     database_statement_timeout_ms: int = Field(default=25_000, ge=1)

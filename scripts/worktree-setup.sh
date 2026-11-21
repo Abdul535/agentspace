@@ -9,7 +9,7 @@ main="$(git worktree list --porcelain | head -1 | sed 's/^worktree //')"
 cd "$here"
 
 if [ "$here" = "$main" ]; then
-  echo "This is the main checkout: it keeps the default ports (API 8000, web 3000) and the \`agentspace\` database."
+  echo "This is the main checkout: it keeps the default ports (API 8000, web 3000) and the \`postgres\` database, the one Supabase Studio shows."
   exit 0
 fi
 

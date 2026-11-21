@@ -10,7 +10,7 @@ cd "$(git rev-parse --show-toplevel)"
 [ -f .worktree.env ] && . ./.worktree.env
 
 container=supabase_db_agentspace
-default_url="postgresql+asyncpg://postgres:postgres@127.0.0.1:55322/agentspace"
+default_url="postgresql+asyncpg://postgres:postgres@127.0.0.1:55322/postgres"
 
 if ! docker info >/dev/null 2>&1; then
   echo "Docker isn't running. Start Docker Desktop, then run this again: the database runs in Docker." >&2

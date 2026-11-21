@@ -57,13 +57,15 @@ How the references do it:
 
   SQLite isn't kept for dev. It would hide the very differences this step is
   about.
-- **Local Supabase runs only its database.** `supabase/config.toml` turns off
-  auth, the REST API, storage, Studio and the rest, because sign-in stays on the
-  hosted project (ADR-024). Its ports start at 55320, so it can run next to
-  another project's stack on the 543xx defaults. Two containers start: Postgres
-  and Kong, which can't be turned off.
+- **Local Supabase runs only its database and Studio.** `supabase/config.toml`
+  turns off auth, the REST API, storage and the rest, because sign-in stays on
+  the hosted project (ADR-024). Studio, the table viewer, stays on. Its ports
+  start at 55320, so it can run next to another project's stack on the 543xx
+  defaults. Four containers start: Postgres,
+  Studio with its helper postgres-meta, and Kong, which can't be turned off.
 - **One server, one database per checkout.** The main checkout uses
-  `agentspace`. A worktree uses `agentspace_<branch>`
+  `postgres`, the one database Supabase Studio shows (http://localhost:55323).
+  A worktree uses `agentspace_<branch>`
   (`agentspace_feat_postgres`), which `scripts/worktree-setup.sh` writes into
   `.worktree.env` as `AGENTSPACE_DATABASE_URL`. It also adds that line to an
   older `.worktree.env` that only had ports. `scripts/db.sh` checks that Docker
@@ -158,7 +160,10 @@ How the references do it:
   local database.
 - Old SQLite data isn't carried over, and worktrees created before this change
   get their own database the next time `scripts/worktree-setup.sh` runs. Until
-  then they use the main checkout's `agentspace` database.
+  then they use the main checkout's `postgres` database.
+- Studio only shows the main checkout's tables. A worktree's own database is
+  read with psql (`docker exec -it supabase_db_agentspace psql -U postgres -d
+  <name>`) or a client such as TablePlus.
 - asyncpg connections belong to the event loop that opened them. A test that
   queries outside the app's loop opens its own engine
   (`test_runs_are_built_with_the_owners_key`).
