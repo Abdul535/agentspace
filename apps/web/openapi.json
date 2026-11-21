@@ -5,6 +5,32 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health",
+        "description": "For load balancers and uptime checks; the only route open without a sign-in.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sessions": {
       "get": {
         "tags": [
@@ -28,7 +54,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -68,7 +99,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/sessions/{session_id}": {
@@ -79,6 +115,11 @@
         "summary": "Get Session",
         "description": "One session and its saved transcript; while it runs, `GET .../events` also has the reply in progress.",
         "operationId": "get_session_sessions__session_id__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -120,6 +161,11 @@
         "summary": "Update Session",
         "description": "Switch the session's model or thinking level; the next run uses them. 409 while a run is in progress.\n\nA real switch also leaves a notice in the transcript for the reader; the model never sees it (ADR-008).",
         "operationId": "update_session_sessions__session_id__patch",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -173,6 +219,11 @@
         "summary": "Archive Session",
         "description": "Hide the session from the list; its transcript is kept. 409 while a run is in progress.",
         "operationId": "archive_session_sessions__session_id__archive_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -209,6 +260,11 @@
         "summary": "Send Message",
         "description": "Start a run on a new user message and stream its events as SSE.\n\nEach SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.\nThe server owns the run (ADR-007): closing this stream only stops listening.\nReattach with `GET .../events`; stop the run with `POST .../abort`.",
         "operationId": "send_message_sessions__session_id__messages_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -284,6 +340,11 @@
         "summary": "Continue Run",
         "description": "Start a run on the transcript as it is, with no new message: a retry after an error, a stop or a crash.\n\nStreams like `POST .../messages`. 409 if a run is going, 422 if the transcript\nis empty or ends with the agent's reply (pi's `agentLoopContinue`).",
         "operationId": "continue_run_sessions__session_id__continue_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -349,6 +410,11 @@
         "summary": "Compact Session",
         "description": "Summarize the older part of the transcript now (ADR-009); streams the run's events like `.../continue`.\n\n409 if a run is going, 422 if the conversation is too short to compact.",
         "operationId": "compact_session_sessions__session_id__compact_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -414,6 +480,11 @@
         "summary": "Watch Session",
         "description": "Attach to the session's run: a `run_snapshot` first, then live events until the run ends.\n\nWith no run in progress, the stream is one snapshot of the saved transcript.",
         "operationId": "watch_session_sessions__session_id__events_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -487,6 +558,11 @@
         "summary": "Steer Run",
         "description": "Queue a message for the model to see after the current turn; it shows up as a `message_end` when it does.",
         "operationId": "steer_run_sessions__session_id__steer_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -538,6 +614,11 @@
         "summary": "Follow Up Run",
         "description": "Queue a message for when the run would otherwise stop; the run then goes on with it.",
         "operationId": "follow_up_run_sessions__session_id__follow_up_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -589,6 +670,11 @@
         "summary": "Abort Run",
         "description": "Stop the session's run; finished messages are kept. 409 if nothing is running.",
         "operationId": "abort_run_sessions__session_id__abort_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "session_id",
@@ -636,7 +722,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/skills": {
@@ -658,7 +749,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       }
     },
     "/skills/{name}": {
@@ -669,6 +765,11 @@
         "summary": "Get Skill",
         "description": "One skill, read fresh: its instructions, prompt entry and files.",
         "operationId": "get_skill_skills__name__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "name",
@@ -712,6 +813,11 @@
         "summary": "Get Skill File",
         "description": "A text file inside the skill's folder; 404 for anything outside it, missing, binary or over 1 MB.",
         "operationId": "get_skill_file_skills__name__files__path__get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
         "parameters": [
           {
             "name": "name",
@@ -775,7 +881,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -818,6 +929,9 @@
         },
         "security": [
           {
+            "HTTPBearer": []
+          },
+          {
             "APIKeyHeader": []
           }
         ]
@@ -832,6 +946,9 @@
         "description": "Change a server; its running processes stop now and start again with the new settings when next needed.",
         "operationId": "update_server_mcp_servers__server_id__patch",
         "security": [
+          {
+            "HTTPBearer": []
+          },
           {
             "APIKeyHeader": []
           }
@@ -889,6 +1006,9 @@
         "operationId": "delete_server_mcp_servers__server_id__delete",
         "security": [
           {
+            "HTTPBearer": []
+          },
+          {
             "APIKeyHeader": []
           }
         ],
@@ -929,6 +1049,9 @@
         "description": "Start the server once, list its tools and stop it. A failure is a result with `ok: false`, not an HTTP error.\n\n403 while MCP is off, since this runs the server's command on the host.",
         "operationId": "test_server_mcp_servers__server_id__test_post",
         "security": [
+          {
+            "HTTPBearer": []
+          },
           {
             "APIKeyHeader": []
           }
@@ -2850,6 +2973,10 @@
       }
     },
     "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "scheme": "bearer"
+      },
       "APIKeyHeader": {
         "type": "apiKey",
         "in": "header",

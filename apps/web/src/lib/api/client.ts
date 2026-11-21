@@ -1,9 +1,23 @@
 import createClient from "openapi-fetch";
 
+import { authHeaders, onSessionEnded } from "@/lib/auth/browser";
+
 import type { components, paths } from "./schema";
 
 /** Typed client for the FastAPI backend, reached through the `/api` rewrite in next.config.ts. */
 export const api = createClient<paths>({ baseUrl: "/api" });
+
+// Every call carries the signed-in user's token; a 401 means the session is over, so sign in again (ADR-024).
+api.use({
+  onRequest: async ({ request }) => {
+    for (const [name, value] of Object.entries(await authHeaders())) request.headers.set(name, value);
+    return request;
+  },
+  onResponse: ({ response }) => {
+    if (response.status === 401) onSessionEnded();
+    return response;
+  },
+});
 
 type Schemas = components["schemas"];
 export type Session = Schemas["SessionPublic"];

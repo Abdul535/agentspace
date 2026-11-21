@@ -1,3 +1,5 @@
+import { authHeaders, onSessionEnded } from "@/lib/auth/browser";
+
 import { type AgentEvent, errorMessage, type RunSnapshot } from "./client";
 import type { components } from "./schema";
 
@@ -23,7 +25,7 @@ export async function* streamPrompt(
   yield* readEvents(
     await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "text/event-stream" },
+      headers: { ...(await authHeaders()), "content-type": "application/json", accept: "text/event-stream" },
       body: JSON.stringify(body),
       signal,
     }),
@@ -35,7 +37,7 @@ export async function* streamContinue(sessionId: string, signal: AbortSignal): A
   yield* readEvents(
     await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/continue`, {
       method: "POST",
-      headers: { accept: "text/event-stream" },
+      headers: { ...(await authHeaders()), accept: "text/event-stream" },
       signal,
     }),
   );
@@ -46,7 +48,7 @@ export async function* streamCompact(sessionId: string, signal: AbortSignal): As
   yield* readEvents(
     await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/compact`, {
       method: "POST",
-      headers: { accept: "text/event-stream" },
+      headers: { ...(await authHeaders()), accept: "text/event-stream" },
       signal,
     }),
   );
@@ -56,7 +58,7 @@ export async function* streamCompact(sessionId: string, signal: AbortSignal): As
 export async function* watchRun(sessionId: string, signal: AbortSignal): AsyncGenerator<RunStreamEvent> {
   yield* readEvents(
     await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/events`, {
-      headers: { accept: "text/event-stream" },
+      headers: { ...(await authHeaders()), accept: "text/event-stream" },
       signal,
     }),
   );
@@ -65,6 +67,7 @@ export async function* watchRun(sessionId: string, signal: AbortSignal): AsyncGe
 // Splits a fetch body into SSE events: EventSource can't POST, and fetch also lets us read error bodies.
 async function* readEvents(response: Response): AsyncGenerator<RunStreamEvent> {
   if (!response.ok || !response.body) {
+    if (response.status === 401) onSessionEnded();
     const body = await response.json().catch(() => null);
     throw new Error(body ? errorMessage(body) : `HTTP ${response.status}`);
   }
