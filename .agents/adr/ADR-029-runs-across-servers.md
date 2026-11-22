@@ -290,6 +290,10 @@ The setting, the error codes and the UI stay as ADR-026 has them.
   heartbeat and the web client's reconnect are unchanged.
 - The API can now run with desired count > 1 (step 58 can raise it, with
   ElastiCache added). A request may land on any task.
+- **But keep one API task until Milestone C.** A session's workspace files still
+  live on the disk of the task that ran the agent: a run on task A writes a file
+  that the next run, on task B, can't read. Steps 59 and 28 move workspaces into a
+  sandbox every task reaches; only then can the desired count go above 1.
 - **One more service everywhere:** Redis in dev (via `db.sh`), CI and production.
   If Redis is down, runs can't start or be watched. Saved transcripts still load,
   since they are in Postgres.
