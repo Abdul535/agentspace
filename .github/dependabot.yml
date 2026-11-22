@@ -21,6 +21,13 @@ updates:
       web-minor-and-patch:
         patterns: ["*"]
         update-types: [minor, patch]
+    ignore:
+      # typescript-eslint (used by eslint-config-next) supports only TypeScript <6.1; lift once it supports 7.
+      - dependency-name: typescript
+        versions: [">=6.1"]
+      # Node types must match the Node major CI runs (24 in ci.yml); bump both together by hand.
+      - dependency-name: "@types/node"
+        update-types: [version-update:semver-major]
 
   # The API's uv.lock.
   - package-ecosystem: uv
