@@ -2,45 +2,35 @@
 
 import base64
 import binascii
-from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterable, AsyncIterator
 from datetime import datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from asyncer import asyncify
 from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel, Field
 
-from agentspace.agent.compaction import build_context, can_compact, compact, context_tokens
-from agentspace.agent.events import AgentEndEvent, AgentEvent, AgentStartEvent
-from agentspace.agent.hooks import LoopConfig
-from agentspace.agent.loop import Emit, can_continue, run_loop
-from agentspace.agent.messages import AgentMessage, NoticeMessage, convert_to_llm
-from agentspace.agent.prompt import build_system_prompt
-from agentspace.agent.skills import load_skills
-from agentspace.agent.tool import Tool, ToolContext
-from agentspace.ai.catalog import CatalogError, ModelInfo, OpenRouterCatalog
+from agentspace.agent.compaction import build_context, can_compact
+from agentspace.agent.events import AgentEvent
+from agentspace.agent.loop import can_continue
+from agentspace.agent.messages import AgentMessage, NoticeMessage
+from agentspace.agent.run_recipe import CompactRun, ContinueRun, PromptRun, model_lookup, run_recipe
 from agentspace.ai.images import MAX_INPUT_BYTES, ImageError, base64_size, process_image
 from agentspace.ai.messages import (
-    AssistantMessage,
-    Message,
     TextContent,
     ThinkingLevel,
     UserContent,
     UserMessage,
-    strip_images,
 )
-from agentspace.ai.overflow import is_context_overflow
 from agentspace.ai.providers import PROVIDERS
 from agentspace.api.deps import CatalogDep, DBDep, Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
 from agentspace.api.mcp_servers import McpDep, McpServerConfigsDep
-from agentspace.config import Settings
-from agentspace.mcp.manager import McpManager, ServerConfig
-from agentspace.runs import QueueKind, RunManager, RunSnapshot
+from agentspace.runs import LoopFn, QueueKind, RunManager, RunSnapshot
 from agentspace.session.db import release
 from agentspace.session.models import SessionRow
 from agentspace.session.store import SessionStore
-from agentspace.tools import TOOL_SETS, ToolSetName, allows_mcp, build_tools
+from agentspace.tools import TOOL_SETS, ToolSetName
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])  # TS: a sub-router, like `new Hono().basePath("/sessions")`
 
@@ -259,7 +249,10 @@ async def send_message(
         await store.set_title(run.session, prompt.text()[:80] or "Image")
     # The stream lasts the whole run; its connection serves other requests meanwhile (ADR-027).
     await release(store.db)
-    async for event in stream_run(run, prompt, settings, runs, model_lookup(run, catalog), mcp, mcp_servers):
+    lookup = model_lookup(run.session.model, catalog)
+    loop = run_recipe(run, PromptRun(prompt), settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=mcp_servers)
+    # TS: each `yield` sends one SSE event to the client the moment it happens.
+    async for event in start(runs, run, loop):
         yield event
 
 
@@ -295,7 +288,9 @@ async def continue_run(
     is empty or ends with the agent's reply (pi's `agentLoopContinue`).
     """
     await release(db)
-    async for event in stream_run(run, None, settings, runs, model_lookup(run, catalog), mcp, mcp_servers):
+    lookup = model_lookup(run.session.model, catalog)
+    loop = run_recipe(run, ContinueRun(), settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=mcp_servers)
+    async for event in start(runs, run, loop):
         yield event
 
 
@@ -316,32 +311,22 @@ def compactable(run: RunDep, settings: SettingsDep) -> Run:
     dependencies=[Depends(no_transform)],
 )
 async def compact_session(
-    run: Annotated[Run, Depends(compactable)], db: DBDep, settings: SettingsDep, runs: RunsDep
+    run: Annotated[Run, Depends(compactable)],
+    db: DBDep,
+    settings: SettingsDep,
+    runs: RunsDep,
+    catalog: CatalogDep,
+    mcp: McpDep,
 ) -> AsyncIterable[ServerSentEvent]:
     """Summarize the older part of the transcript now (ADR-009); streams the run's events like `.../continue`.
 
     409 if a run is going, 422 if the conversation is too short to compact.
     """
-
-    async def loop(emit: Emit) -> None:
-        """A run that only compacts, framed by `agent_start`/`agent_end` like any other run."""
-        await emit(AgentStartEvent())
-        saved = await compact(
-            run.active.messages[:],
-            provider=run.provider,
-            model=run.session.model,
-            keep_recent_tokens=settings.compaction_keep_recent_tokens,
-            max_tokens=settings.max_output_tokens,
-            reason="manual",
-            emit=emit,
-            thinking_level=run.session.thinking_level,
-        )
-        new = run.active.messages[-1:] if saved else []
-        await emit(AgentEndEvent(reason="done" if saved else "error", new_messages=new))
-
     await release(db)
-    runs.start(run.active, loop)
-    async for event in stream(runs, run.active.session_id, run.active.run_id, run.active.start_id):
+    lookup = model_lookup(run.session.model, catalog)
+    # No MCP servers: a compact run calls no tools, and reading their configs could only make it fail.
+    loop = run_recipe(run, CompactRun(), settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=[])
+    async for event in start(runs, run, loop):
         yield event
 
 
@@ -351,129 +336,10 @@ async def stream(runs: RunManager, session_id: str, run_id: str, after: str) -> 
         yield ServerSentEvent(data=entry.event, id=entry.id)
 
 
-# Looks up the session model in the catalog when the run needs it; None when the catalog doesn't know it.
-type ModelLookup = Callable[[], Awaitable[ModelInfo | None]]
-
-
-def model_lookup(run: Run, catalog: OpenRouterCatalog) -> ModelLookup:
-    """How the run finds what its model can do (window, images): from the catalog (ADR-005), fetched only if asked."""
-
-    async def lookup() -> ModelInfo | None:
-        """The model's catalog entry, or None if the catalog can't be reached or doesn't list it."""
-        try:
-            models = await catalog.models()
-        except CatalogError:
-            return None
-        return next((m for m in models if m.id == run.session.model), None)
-
-    return lookup
-
-
-async def stream_run(
-    run: Run,
-    prompt: UserMessage | None,
-    settings: Settings,
-    runs: RunManager,
-    lookup_model: ModelLookup,
-    mcp: McpManager,
-    mcp_servers: list[ServerConfig],
-) -> AsyncIterator[ServerSentEvent]:
-    """Start the claimed run in the background, on a prompt or continuing, and yield its events to this client.
-
-    The tools are the session's built-in ones plus those of the enabled MCP servers that connect in time (ADR-017).
-
-    After the loop, the run compacts if the context neared the window, or compacts and
-    retries once if the provider refused it as too long (ADR-009).
-    """
-    session = run.session
-    run.workspace.mkdir(parents=True, exist_ok=True)
-    tools: list[Tool] = build_tools(session.tools, bash=settings.enable_bash)
-    # Rescanned every run, so an added or edited skill shows without a restart (ADR-016).
-    skills, _ = await asyncify(load_skills)(settings.resolved_skills_dir)
-
-    async def agent(emit: Emit, prompt: UserMessage | None) -> None:
-        """One pass of the agent loop over what the model reads of the transcript so far."""
-        info = await lookup_model()
-        # Built here, not once above, so it lists the MCP tools that joined at the start of the run.
-        system_prompt = build_system_prompt(session.system_prompt, tools, skills)
-        run.active.trace.set_system_prompt(system_prompt)
-        # Only when the catalog says so: an unknown model gets the images, and a refusal is a normal error.
-        blind = info is not None and not info.image_input
-
-        def to_llm(messages: list[AgentMessage]) -> list[Message]:
-            """The default conversion, with images swapped for a note when the model can't see them (ADR-015)."""
-            converted = convert_to_llm(messages)
-            return strip_images(converted) if blind else converted
-
-        await run_loop(
-            provider=run.provider,
-            model=session.model,
-            system_prompt=system_prompt,
-            tools=tools,
-            # A copy: the run appends to its own list as messages finish.
-            history=build_context(run.active.messages),
-            prompt=prompt,
-            ctx=ToolContext(workspace=run.workspace, read_roots=tuple(skill.base_dir for skill in skills)),
-            max_turns=settings.max_turns,
-            max_tokens=settings.max_output_tokens,
-            thinking_level=session.thinking_level,
-            # Prices each reply when OpenRouter doesn't bill it; an unknown model's replies cost $0.
-            price=info.price() if info else None,
-            # Messages the user queues during the run (`POST .../steer`, `.../follow-up`).
-            config=LoopConfig(
-                get_steering_messages=run.active.take_steering,
-                get_follow_up_messages=run.active.take_follow_ups,
-                convert_to_llm=to_llm,
-            ),
-            emit=emit,
-        )
-
-    async def compact_now(emit: Emit, reason: Literal["threshold", "overflow"]) -> bool:
-        """Summarize the older part of the transcript; False if it failed or there was nothing to summarize."""
-        return await compact(
-            run.active.messages[:],
-            provider=run.provider,
-            model=session.model,
-            keep_recent_tokens=settings.compaction_keep_recent_tokens,
-            max_tokens=settings.max_output_tokens,
-            reason=reason,
-            emit=emit,
-            thinking_level=session.thinking_level,
-        )
-
-    async def over_threshold() -> bool:
-        """Whether the context is within the reserve of the model's window, with an older part to summarize."""
-        # Checked first, so a short session never needs the catalog.
-        if not can_compact(run.active.messages, settings.compaction_keep_recent_tokens):
-            return False
-        info = await lookup_model()
-        limit = info.context_length if info else None
-        tokens = context_tokens(build_context(run.active.messages))
-        return limit is not None and tokens > limit - settings.compaction_reserve_tokens
-
-    # TS: an inner function closing over this request's values; the manager calls it with its own `emit`.
-    async def loop(emit: Emit) -> None:
-        """This run: MCP tools, the agent loop, then compaction if the context needs it."""
-        # Inside the run, so the stream is already open while slow servers are waited for.
-        # Never for a read-only session: an MCP tool can do anything its server does, writes included.
-        if mcp_servers and allows_mcp(session.tools):
-            tools.extend(await mcp.tools_for(session.id, run.workspace, mcp_servers))
-        await agent(emit, prompt)
-        if not settings.compaction_enabled:
-            return
-        last = run.active.messages[-1] if run.active.messages else None
-        if isinstance(last, AssistantMessage) and is_context_overflow(last):
-            # Once only: if the retry overflows too, compacting again won't make room, so the error stands.
-            if await compact_now(emit, "overflow"):
-                await agent(emit, None)
-            return
-        if await over_threshold():
-            await compact_now(emit, "threshold")
-
+def start(runs: RunManager, run: Run, loop: LoopFn) -> AsyncIterator[ServerSentEvent]:
+    """Start the claimed run in the background with its recipe's loop, and stream its events to this client."""
     runs.start(run.active, loop)
-    # TS: each `yield` sends one SSE event to the client the moment it happens.
-    async for event in stream(runs, run.active.session_id, run.active.run_id, run.active.start_id):
-        yield event
+    return stream(runs, run.active.session_id, run.active.run_id, run.active.start_id)
 
 
 @router.get(

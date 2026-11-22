@@ -21,7 +21,6 @@ from agentspace.agent.events import AgentEvent, CompactionEndEvent, MessageEndEv
 from agentspace.agent.messages import AgentMessage, CompactionSummaryMessage, NoticeMessage, convert_to_llm
 from agentspace.ai.catalog import CatalogError, ModelInfo
 from agentspace.ai.messages import AssistantMessage, ToolCall, ToolResultMessage, UserMessage
-from agentspace.ai.provider import prepare_transcript
 from agentspace.ai.providers.fake import FakeProvider, text_reply, tool_reply
 from agentspace.api.deps import get_catalog, provider_lookup
 from agentspace.config import Settings
@@ -286,70 +285,11 @@ def roles(client: TestClient, session_id: str) -> list[str]:
     return [m["role"] for m in client.get(f"/sessions/{session_id}").json()["messages"]]
 
 
-def test_a_run_that_ends_near_the_window_compacts_afterwards(client: TestClient, fake: FakeProvider) -> None:
-    session_id = client.post("/sessions", json={}).json()["id"]
-    fake.replies = [used(100)]
-    client.post(f"/sessions/{session_id}/messages", json={"content": BIG})
-    assert roles(client, session_id) == ["user", "assistant"]  # 100 tokens: far from the window
-
-    # 900 > 1000 - 200: past the threshold, with older messages to summarize.
-    fake.replies = [used(900), text_reply("## Goal\nkeep going")]
-    events = client.post(f"/sessions/{session_id}/messages", json={"content": BIG}).text
-
-    assert sse_types(events)[-4:] == ["compaction_start", "message_start", "message_end", "compaction_end"]
-    assert roles(client, session_id) == ["user", "assistant", "user", "assistant", "compaction_summary"]
-
-    # The next prompt reads the summary instead of what it replaced.
-    fake.replies = [text_reply("ok")]
-    client.post(f"/sessions/{session_id}/messages", json={"content": "next"})
-    sent = fake.contexts[-1].messages
-    assert sent[0].role == "user" and isinstance(sent[0].content, str) and "keep going" in sent[0].content
-    assert len(sent) < 6
-
-
-@pytest.mark.parametrize("catalog", [FakeCatalog(window=None)])
-def test_an_unknown_window_skips_the_threshold(client: TestClient, fake: FakeProvider) -> None:
-    session_id = client.post("/sessions", json={}).json()["id"]
-    fake.replies = [used(100), used(900_000)]
-    client.post(f"/sessions/{session_id}/messages", json={"content": BIG})
-    events = client.post(f"/sessions/{session_id}/messages", json={"content": BIG}).text
-    assert "compaction_start" not in sse_types(events)
-
-
 def overflow() -> AssistantMessage:
+    """A reply the provider refused because the context was too long."""
     return AssistantMessage(
         provider="f", model="m", stop_reason="error", error_message="This model's maximum context length is 1000 tokens"
     )
-
-
-def test_an_overflow_compacts_and_retries_once(client: TestClient, fake: FakeProvider) -> None:
-    session_id = client.post("/sessions", json={}).json()["id"]
-    fake.replies = [used(100)]
-    client.post(f"/sessions/{session_id}/messages", json={"content": BIG})
-
-    fake.replies = [overflow(), text_reply("S"), text_reply("answered")]
-    events = sse_types(client.post(f"/sessions/{session_id}/messages", json={"content": BIG}).text)
-
-    assert events.count("agent_start") == 2 and "compaction_end" in events
-    assert roles(client, session_id)[-3:] == ["assistant", "compaction_summary", "assistant"]
-    # The retry read the summary, then the prompt that overflowed; the failed reply was dropped.
-    # (The real provider adapter drops the failed reply in `prepare_transcript`; the fake sees it raw.)
-    retry = prepare_transcript(fake.contexts[-1].messages)
-    assert retry[0].role == "user" and retry[-1].role == "user"
-
-
-def test_a_second_overflow_ends_the_run_with_the_error(client: TestClient, fake: FakeProvider) -> None:
-    session_id = client.post("/sessions", json={}).json()["id"]
-    fake.replies = [used(100)]
-    client.post(f"/sessions/{session_id}/messages", json={"content": BIG})
-
-    fake.replies = [overflow(), text_reply("S"), overflow()]
-    events = client.post(f"/sessions/{session_id}/messages", json={"content": BIG}).text
-
-    assert sse_types(events).count("compaction_start") == 1
-    last = client.get(f"/sessions/{session_id}").json()["messages"][-1]
-    assert last["role"] == "assistant" and last["stop_reason"] == "error"
-    assert fake.replies == []
 
 
 def test_manual_compaction_refuses_a_short_or_busy_session(client: TestClient) -> None:

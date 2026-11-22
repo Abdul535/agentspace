@@ -1,21 +1,20 @@
 """FastAPI dependencies shared by the routes: settings, database, user, store, provider, catalog, runs and run slot."""
 
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from agentspace.agent.run_recipe import Run
 from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.ai.provider import Provider
 from agentspace.ai.providers import PROVIDER_LABELS, MissingApiKeyError, UnknownProviderError, get_provider
 from agentspace.auth import AuthUser, require_user
 from agentspace.config import Settings
 from agentspace.encryption import SecretBox, SecretError
-from agentspace.runs import ActiveRun, RunManager, SessionBusyError, TooManyRunsError
+from agentspace.runs import RunManager, SessionBusyError, TooManyRunsError
 from agentspace.session.db import open_db
 from agentspace.session.keys import list_keys
 from agentspace.session.models import LOCAL_USER_ID, SessionRow, UserRow
@@ -134,16 +133,6 @@ def get_runs(request: Request) -> RunManager:
 
 
 RunsDep = Annotated[RunManager, Depends(get_runs)]
-
-
-@dataclass(frozen=True)
-class Run:
-    """What starting a prompt run needs: the session, its provider, its workspace and its claimed run slot."""
-
-    session: SessionRow
-    provider: Provider
-    workspace: Path
-    active: ActiveRun
 
 
 async def claim_run(
