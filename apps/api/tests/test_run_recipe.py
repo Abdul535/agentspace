@@ -1,5 +1,6 @@
 """The run recipe: what a prompt, continue or compact run does, driven without HTTP, Postgres or Redis."""
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
@@ -23,7 +24,7 @@ from agentspace.ai.provider import Price, prepare_transcript
 from agentspace.ai.providers.fake import FakeProvider, text_reply, tool_reply
 from agentspace.config import Settings
 from agentspace.mcp.manager import McpManager
-from agentspace.runs import ActiveRun
+from agentspace.runs import ActiveRun, QueueKind
 from agentspace.session.models import SessionRow
 from agentspace.tools import TOOL_SETS
 from agentspace.tracing import RunTrace
@@ -48,10 +49,13 @@ class Lookup:
     """A model lookup that answers with a fixed entry (None: the catalog doesn't know it) and counts its calls."""
 
     def __init__(self, info: ModelInfo | None) -> None:
+        """Answer with `info` from now on."""
         self.info = info
         self.calls = 0
 
+    # TS: `__call__` makes an instance callable like a function, so it fits where a `() => Promise<...>` goes.
     async def __call__(self) -> ModelInfo | None:
+        """The fixed entry, counting the call."""
         self.calls += 1
         return self.info
 
@@ -59,7 +63,9 @@ class Lookup:
 class Recipe:
     """One session's runs through the recipe, each on a fresh in-memory active run over the transcript so far."""
 
+    # TS: `**settings` collects the extra keyword arguments into a dict, like a rest parameter `...settings`.
     def __init__(self, tmp_path: Path, fake: FakeProvider, **settings: object) -> None:
+        """A session on the fake provider, with small compaction limits and any settings overridden."""
         self.fake = fake
         self.settings = Settings(
             _env_file=None,
@@ -76,47 +82,72 @@ class Recipe:
         self.mcp_servers: list = []
         self.messages: list = []
 
-    async def run(self, kind: RunKind, steer: str | None = None, trace: RunTrace | None = None) -> list[AgentEvent]:
-        """Run one recipe to its end, saving finished messages the way the run manager does; its events in order."""
+    def build(
+        self, kind: RunKind, queued: tuple[QueueKind, str] | None = None, trace: RunTrace | None = None
+    ) -> Callable[[], Awaitable[list[AgentEvent]]]:
+        """Build one run's recipe now; the returned function runs it to its end and gives its events in order."""
         active = ActiveRun(session_id=self.session.id, messages=self.messages[:], history_size=len(self.messages))
-        if steer:
-            active.queue("steer", UserMessage(content=steer))
+        if queued:
+            active.queue(queued[0], UserMessage(content=queued[1]))
         if trace:
             active.trace = trace
         self.active = active
         run = Run(session=self.session, provider=self.fake, workspace=self.workspace, active=active)
-        events: list[AgentEvent] = []
+        # A compact run is built the way the compact route builds it: with no catalog and no MCP.
+        if isinstance(kind, CompactRun):
+            loop = run_recipe(run, kind, settings=self.settings)
+        else:
+            loop = run_recipe(
+                run, kind, settings=self.settings, lookup_model=self.lookup, mcp=self.mcp, mcp_servers=self.mcp_servers
+            )
 
-        async def emit(event: AgentEvent) -> None:
-            events.append(event)
-            active.track(event)
+        async def go() -> list[AgentEvent]:
+            """Drive the loop, saving finished messages the way the run manager does."""
+            events: list[AgentEvent] = []
 
-        loop = run_recipe(
-            run, kind, settings=self.settings, lookup_model=self.lookup, mcp=self.mcp, mcp_servers=self.mcp_servers
-        )
-        await loop(emit)
-        self.messages = active.messages
-        return events
+            async def emit(event: AgentEvent) -> None:
+                """Record the event and fold it into the active run."""
+                events.append(event)
+                active.track(event)
+
+            await loop(emit)
+            self.messages = active.messages
+            return events
+
+        return go
+
+    async def run(
+        self, kind: RunKind, queued: tuple[QueueKind, str] | None = None, trace: RunTrace | None = None
+    ) -> list[AgentEvent]:
+        """Build and run one recipe to its end; its events in order."""
+        return await self.build(kind, queued, trace)()
 
     async def prompt(self, text: str = BIG) -> list[str]:
         """A prompt run; its event types."""
+        # TS: a list comprehension, like `events.map((e) => e.type)`.
         return [e.type for e in await self.run(PromptRun(prompt=UserMessage(content=text)))]
 
+    # TS: `@property` makes a method read like a field, like a `get workspace()` accessor.
     @property
     def workspace(self) -> Path:
+        """The session's workspace folder."""
         return self.settings.workspaces_dir / self.session.id
 
     def roles(self) -> list[str]:
+        """The role of each saved message, in order."""
         return [m.role for m in self.messages]
 
 
+# TS: a decorator wraps or registers the function below it; here it makes `fake` a value tests ask for by name.
 @pytest.fixture
 def fake() -> FakeProvider:
+    """A fake provider with no replies queued yet."""
     return FakeProvider([])
 
 
 @pytest.fixture
 def recipe(tmp_path: Path, fake: FakeProvider) -> Recipe:
+    """A session's recipe on the fake provider."""
     return Recipe(tmp_path, fake)
 
 
@@ -144,7 +175,7 @@ async def test_a_run_that_ends_near_the_window_compacts_afterwards(recipe: Recip
 
 
 async def test_an_unknown_window_skips_the_threshold(recipe: Recipe, fake: FakeProvider) -> None:
-    recipe.lookup.info = None
+    recipe.lookup.info = model(window=None)
     fake.replies = [used(100), used(900_000)]
     await recipe.prompt()
     assert "compaction_start" not in await recipe.prompt()
@@ -277,15 +308,12 @@ async def test_a_read_only_session_never_gets_mcp_tools(recipe: Recipe, fake: Fa
 async def test_mcp_tools_join_inside_the_run_and_the_prompt_lists_them(recipe: Recipe, fake: FakeProvider) -> None:
     recipe.mcp_servers = [fake_config()]
     fake.replies = [text_reply("ok")]
-    active = ActiveRun(session_id="s", messages=[], history_size=0)
-    run = Run(session=recipe.session, provider=fake, workspace=recipe.workspace, active=active)
     try:
+        go = recipe.build(PromptRun(prompt=UserMessage(content="hi")))
         # Building the run connects nothing: the servers are only waited for once the run is going.
-        run_recipe(
-            run, ContinueRun(), settings=recipe.settings, lookup_model=recipe.lookup, mcp=recipe.mcp, mcp_servers=[]
-        )
         assert recipe.mcp.sessions == {}
-        await recipe.prompt("hi")
+        await go()
+        assert "s" in recipe.mcp.sessions
     finally:
         await recipe.mcp.shutdown()
     assert "mcp__fake__echo" in [t.name for t in fake.contexts[0].tools]
@@ -296,9 +324,11 @@ class RecordingTrace(RunTrace):
     """A no-op trace that keeps the system prompts it was handed."""
 
     def __init__(self) -> None:
+        """Start with no prompts recorded."""
         self.system_prompts: list[str] = []
 
     def set_system_prompt(self, system_prompt: str) -> None:
+        """Record the prompt instead of sending it anywhere."""
         self.system_prompts.append(system_prompt)
 
 
@@ -358,10 +388,19 @@ async def test_skills_are_rescanned_each_run_and_their_folders_are_readable(reci
 
 async def test_a_steer_message_queued_on_the_run_reaches_the_loop(recipe: Recipe, fake: FakeProvider) -> None:
     fake.replies = [text_reply("turning")]
-    await recipe.run(PromptRun(prompt=UserMessage(content="go")), steer="turn left")
+    await recipe.run(PromptRun(prompt=UserMessage(content="go")), queued=("steer", "turn left"))
     sent = [m.content for m in fake.contexts[0].messages if isinstance(m, UserMessage)]
     assert sent == ["go", "turn left"]
     assert [m.role for m in recipe.messages] == ["user", "user", "assistant"]
+
+
+async def test_a_follow_up_queued_on_the_run_goes_on_after_the_reply(recipe: Recipe, fake: FakeProvider) -> None:
+    fake.replies = [text_reply("done"), text_reply("tests too")]
+    await recipe.run(PromptRun(prompt=UserMessage(content="go")), queued=("follow_up", "now the tests"))
+    # The run would have stopped after "done"; the follow-up starts another turn instead.
+    sent = [m.content for m in fake.contexts[-1].messages if isinstance(m, UserMessage)]
+    assert sent == ["go", "now the tests"]
+    assert recipe.roles() == ["user", "assistant", "user", "assistant"]
 
 
 # --- pricing (ADR-019) ----------------------------------------------------------------------------------------------

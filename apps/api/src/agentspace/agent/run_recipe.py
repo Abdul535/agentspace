@@ -9,15 +9,14 @@ test or a later worker process (ADR-022) can build a run without a request.
 ADR-009 places the threshold and overflow checks in `stream_run` in the sessions routes; they moved here.
 """
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
 
 from asyncer import asyncify
 
 from agentspace.agent.compaction import build_context, can_compact, compact, context_tokens
-from agentspace.agent.events import AgentEndEvent, AgentStartEvent
+from agentspace.agent.events import AgentEndEvent, AgentStartEvent, CompactionReason
 from agentspace.agent.hooks import LoopConfig
 from agentspace.agent.loop import Emit, run_loop
 from agentspace.agent.messages import AgentMessage, convert_to_llm
@@ -60,9 +59,7 @@ class ContinueRun:
 
 @dataclass(frozen=True)
 class CompactRun:
-    """A run that only summarizes the older part of the transcript."""
-
-    reason: Literal["manual"] = "manual"
+    """A run that only summarizes the older part of the transcript; it needs no catalog and no MCP."""
 
 
 # TS: a union of classes, narrowed with `match`/`isinstance` like a discriminated union on `kind`.
@@ -81,6 +78,7 @@ def model_lookup(model: str, catalog: OpenRouterCatalog) -> ModelLookup:
             models = await catalog.models()
         except CatalogError:
             return None
+        # TS: `next(<generator>, None)` is like `models.find((m) => m.id === model) ?? null`, stopping at the first.
         return next((m for m in models if m.id == model), None)
 
     return lookup
@@ -91,15 +89,19 @@ def run_recipe(
     kind: RunKind,
     *,  # TS: everything after `*` must be passed by name, like a single options object
     settings: Settings,
-    lookup_model: ModelLookup,
-    mcp: McpManager,
-    mcp_servers: list[ServerConfig],
+    lookup_model: ModelLookup | None = None,
+    mcp: McpManager | None = None,
+    mcp_servers: Sequence[ServerConfig] = (),
 ) -> LoopFn:
-    """The loop function for this kind of run, for the run manager to drive with its own `emit`."""
+    """The loop function for this kind of run, for the run manager to drive with its own `emit`.
+
+    A prompt or continue run looks its model up with `lookup_model` (none: treated as unknown) and gets the
+    tools of `mcp_servers` from `mcp`; a compact run uses neither, so its route needn't provide them.
+    """
     session = run.session
     active = run.active
 
-    async def compact_now(emit: Emit, reason: Literal["threshold", "overflow", "manual"]) -> bool:
+    async def compact_now(emit: Emit, reason: CompactionReason) -> bool:
         """Summarize the older part of the transcript; False if it failed or there was nothing to summarize."""
         # The one compaction call every kind of run makes, so their arguments can't drift apart.
         return await compact(
@@ -125,9 +127,13 @@ def run_recipe(
         return compact_only
     prompt = kind.prompt if isinstance(kind, PromptRun) else None
 
-    async def agent(emit: Emit, prompt: UserMessage | None, tools: list[Tool], skills: list[Skill]) -> None:
-        """One pass of the agent loop over what the model reads of the transcript so far."""
-        info = await lookup_model()
+    async def find_model() -> ModelInfo | None:
+        """The model's catalog entry, or None when there's no catalog or it doesn't know the model."""
+        return await lookup_model() if lookup_model else None
+
+    async def agent(emit: Emit, message: UserMessage | None, tools: list[Tool], skills: list[Skill]) -> None:
+        """One pass of the agent loop over the transcript so far, with `message` added first if given."""
+        info = await find_model()
         # Built per pass, after MCP joined, so the prompt lists exactly the tools the model gets.
         system_prompt = build_system_prompt(session.system_prompt, tools, skills)
         active.trace.set_system_prompt(system_prompt)
@@ -146,7 +152,7 @@ def run_recipe(
             tools=tools,
             # A copy: the run appends to its own list as messages finish.
             history=build_context(active.messages),
-            prompt=prompt,
+            prompt=message,
             ctx=ToolContext(workspace=run.workspace, read_roots=tuple(skill.base_dir for skill in skills)),
             max_turns=settings.max_turns,
             max_tokens=settings.max_output_tokens,
@@ -167,7 +173,7 @@ def run_recipe(
         # Checked first, so a short session never needs the catalog.
         if not can_compact(active.messages, settings.compaction_keep_recent_tokens):
             return False
-        info = await lookup_model()
+        info = await find_model()
         limit = info.context_length if info else None
         tokens = context_tokens(build_context(active.messages))
         return limit is not None and tokens > limit - settings.compaction_reserve_tokens
@@ -181,8 +187,8 @@ def run_recipe(
         skills, _ = await asyncify(load_skills)(settings.resolved_skills_dir)
         # Inside the run, so the stream is already open while slow servers are waited for.
         # Never for a read-only session: an MCP tool can do anything its server does, writes included.
-        if mcp_servers and allows_mcp(session.tools):
-            tools.extend(await mcp.tools_for(session.id, run.workspace, mcp_servers))
+        if mcp and mcp_servers and allows_mcp(session.tools):
+            tools.extend(await mcp.tools_for(session.id, run.workspace, list(mcp_servers)))
         await agent(emit, prompt, tools, skills)
         if not settings.compaction_enabled:
             return

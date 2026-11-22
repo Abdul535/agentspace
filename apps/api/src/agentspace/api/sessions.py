@@ -15,7 +15,8 @@ from agentspace.agent.compaction import build_context, can_compact
 from agentspace.agent.events import AgentEvent
 from agentspace.agent.loop import can_continue
 from agentspace.agent.messages import AgentMessage, NoticeMessage
-from agentspace.agent.run_recipe import CompactRun, ContinueRun, PromptRun, model_lookup, run_recipe
+from agentspace.agent.run_recipe import CompactRun, ContinueRun, PromptRun, Run, RunKind, model_lookup, run_recipe
+from agentspace.ai.catalog import OpenRouterCatalog
 from agentspace.ai.images import MAX_INPUT_BYTES, ImageError, base64_size, process_image
 from agentspace.ai.messages import (
     TextContent,
@@ -24,8 +25,10 @@ from agentspace.ai.messages import (
     UserMessage,
 )
 from agentspace.ai.providers import PROVIDERS
-from agentspace.api.deps import CatalogDep, DBDep, Run, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
+from agentspace.api.deps import CatalogDep, DBDep, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
 from agentspace.api.mcp_servers import McpDep, McpServerConfigsDep
+from agentspace.config import Settings
+from agentspace.mcp.manager import McpManager, ServerConfig
 from agentspace.runs import LoopFn, QueueKind, RunManager, RunSnapshot
 from agentspace.session.db import release
 from agentspace.session.models import SessionRow
@@ -249,10 +252,9 @@ async def send_message(
         await store.set_title(run.session, prompt.text()[:80] or "Image")
     # The stream lasts the whole run; its connection serves other requests meanwhile (ADR-027).
     await release(store.db)
-    lookup = model_lookup(run.session.model, catalog)
-    loop = run_recipe(run, PromptRun(prompt), settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=mcp_servers)
+    loop = agent_recipe(run, PromptRun(prompt), settings, catalog, mcp, mcp_servers)
     # TS: each `yield` sends one SSE event to the client the moment it happens.
-    async for event in start(runs, run, loop):
+    async for event in start_and_stream(runs, run, loop):
         yield event
 
 
@@ -288,9 +290,8 @@ async def continue_run(
     is empty or ends with the agent's reply (pi's `agentLoopContinue`).
     """
     await release(db)
-    lookup = model_lookup(run.session.model, catalog)
-    loop = run_recipe(run, ContinueRun(), settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=mcp_servers)
-    async for event in start(runs, run, loop):
+    loop = agent_recipe(run, ContinueRun(), settings, catalog, mcp, mcp_servers)
+    async for event in start_and_stream(runs, run, loop):
         yield event
 
 
@@ -315,18 +316,15 @@ async def compact_session(
     db: DBDep,
     settings: SettingsDep,
     runs: RunsDep,
-    catalog: CatalogDep,
-    mcp: McpDep,
 ) -> AsyncIterable[ServerSentEvent]:
     """Summarize the older part of the transcript now (ADR-009); streams the run's events like `.../continue`.
 
     409 if a run is going, 422 if the conversation is too short to compact.
     """
     await release(db)
-    lookup = model_lookup(run.session.model, catalog)
-    # No MCP servers: a compact run calls no tools, and reading their configs could only make it fail.
-    loop = run_recipe(run, CompactRun(), settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=[])
-    async for event in start(runs, run, loop):
+    # No catalog or MCP: a compact run reads no model entry and calls no tools, so they could only make it fail.
+    loop = run_recipe(run, CompactRun(), settings=settings)
+    async for event in start_and_stream(runs, run, loop):
         yield event
 
 
@@ -336,7 +334,20 @@ async def stream(runs: RunManager, session_id: str, run_id: str, after: str) -> 
         yield ServerSentEvent(data=entry.event, id=entry.id)
 
 
-def start(runs: RunManager, run: Run, loop: LoopFn) -> AsyncIterator[ServerSentEvent]:
+def agent_recipe(
+    run: Run,
+    kind: RunKind,
+    settings: Settings,
+    catalog: OpenRouterCatalog,
+    mcp: McpManager,
+    mcp_servers: list[ServerConfig],
+) -> LoopFn:
+    """The loop of a prompt or continue run: the recipe with the session model's catalog entry and MCP tools."""
+    lookup = model_lookup(run.session.model, catalog)
+    return run_recipe(run, kind, settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=mcp_servers)
+
+
+def start_and_stream(runs: RunManager, run: Run, loop: LoopFn) -> AsyncIterator[ServerSentEvent]:
     """Start the claimed run in the background with its recipe's loop, and stream its events to this client."""
     runs.start(run.active, loop)
     return stream(runs, run.active.session_id, run.active.run_id, run.active.start_id)
