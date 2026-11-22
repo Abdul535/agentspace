@@ -71,3 +71,20 @@ def pid_alive(pid: int) -> bool:
     except PermissionError:
         return True  # it exists, but belongs to another user
     return True
+
+
+def mark_running(session_id: str) -> str:
+    """Give the session a running `runs` row, as if another server's run had claimed it; returns the run's id."""
+    run_id = secrets.token_hex(8)
+    db_rows(
+        "INSERT INTO runs (id, session_id, user_id, status, owner, heartbeat_at, started_at)"
+        " SELECT $1, id, user_id, 'running', 'elsewhere', now(), now() FROM sessions WHERE id = $2",
+        run_id,
+        session_id,
+    )
+    return run_id
+
+
+def mark_done(run_id: str) -> None:
+    """End a run that `mark_running` made."""
+    db_rows("UPDATE runs SET status = 'done', ended_at = now() WHERE id = $1", run_id)

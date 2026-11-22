@@ -1,6 +1,6 @@
 # ADR-028 — Numbered run events: resume a dropped stream from `Last-Event-ID`
 
-- **Status:** Accepted
+- **Status:** Accepted; superseded in part by ADR-029 (Redis Stream entry ids replace `<run_id>.<seq>`, and the Stream replaces `ActiveRun.recent`)
 - **Date:** 2026-11-22
 - **Deciders:** project owner
 

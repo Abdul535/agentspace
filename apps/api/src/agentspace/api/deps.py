@@ -129,7 +129,7 @@ def refusal(code: str, message: str) -> dict[str, str]:
 
 
 def get_runs(request: Request) -> RunManager:
-    """The app-wide run manager (ADR-007)."""
+    """The app-wide run manager (ADR-007, ADR-029)."""
     return request.app.state.runs
 
 
@@ -184,7 +184,7 @@ async def claim_run(
     try:
         yield Run(session=session, provider=provider, workspace=settings.workspaces_dir / session.id, active=active)
     finally:
-        runs.release(active)  # no-op once the run has started: from then on the run frees its own slot
+        await runs.release(active)  # no-op once the run has started: from then on the run frees its own slot
 
 
 RunDep = Annotated[Run, Depends(claim_run)]

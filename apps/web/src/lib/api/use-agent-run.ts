@@ -59,6 +59,10 @@ const idle: RunState = {
 // Tries to reopen a dropped stream before giving up; the waits add up to about half a minute.
 const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000, 8000, 8000];
 
+// Shown when the server driving a run stopped before it finished (a deploy, a crash).
+const INTERRUPTED =
+  "The server running this reply stopped before it finished. What was saved is kept: press Continue or send a message to go on.";
+
 // Resolves after `ms`, or as soon as `signal` aborts.
 function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -169,6 +173,8 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
       }
       // A failed compaction leaves no message behind, so its reason is kept to show once the run ends.
       if (event.type === "compaction_end" && event.error) error = event.error;
+      // The server driving the run stopped or went silent (ADR-029): nothing in the transcript says so.
+      if (event.type === "agent_end" && event.reason === "interrupted") error = INTERRUPTED;
       setState((s) => reduce(s, event));
     }
 
@@ -257,7 +263,8 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
     setQueued(next);
   }
 
-  // Queue a message on the running agent; a 409 means the run is ending and won't pick it up.
+  // Queue a message on the running agent; a 409 means no run is going. One the run never picks up
+  // (it was already ending) comes back through `onUnsent` when the run ends.
   async function queue(kind: QueueKind, content: string) {
     // Listed before the request: the agent may pick it up before the response arrives.
     const item = { kind, content };
@@ -273,7 +280,8 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
 
   // Stop the run on the server; the stream then ends on its own with `agent_end` (reason "aborted").
   async function stop() {
-    // A 409 means the run already ended, and its stream is closing anyway.
+    // A 409 means the run already ended, and its stream is closing anyway. A 202 means another server
+    // drives it and hasn't confirmed yet (ADR-029): the stream still ends once it has.
     await api.POST("/sessions/{session_id}/abort", { params: { path: { session_id: sessionId } } });
   }
 

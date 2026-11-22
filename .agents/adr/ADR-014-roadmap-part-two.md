@@ -86,10 +86,14 @@ ADR-003 stays as it is for steps 1–25.
     10,000 events, `GET .../events` resumes from `Last-Event-ID` or falls back to
     a snapshot, FastAPI's built-in 15 s `: ping`, and the web client reconnects
     by itself with a "Reconnecting…" cue.
-33. [ ] **Runs across several workers.** Move the run lock and the event fan-out
+33. [x] **Runs across several workers.** Move the run lock and the event fan-out
     out of one process (a DB lock, then a shared stream such as Redis Streams),
     so the API can run with several workers. Deferred by ADR-007; supersedes part
     of it. Needs step 32.
+    Built as follows (ADR-029): a `runs` table in Postgres (one running row per
+    session, an owner and a 5 s heartbeat; silent for 30 s means interrupted), a
+    Redis Stream of events per session whose entry ids are the SSE ids, and a
+    control Stream per server for stop, steer and follow-up.
 34. [x] **Usage and cost.** Price each reply from the catalog (OpenRouter's
     `pricing`, or its billed cost when sent), save it on `Usage`, and show a
     per-session total in the UI.

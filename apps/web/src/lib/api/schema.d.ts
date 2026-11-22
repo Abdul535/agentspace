@@ -108,8 +108,8 @@ export interface paths {
          * @description Start a run on a new user message and stream its events as SSE.
          *
          *     Each SSE `data` field is one `AgentEvent` as JSON; its `type` names the event.
-         *     Its `id` numbers the event in the run (ADR-028): send the last one as `Last-Event-ID`
-         *     to `GET .../events` after a dropped connection to get only what was missed.
+         *     Its `id` is the event's entry in the session's Redis Stream (ADR-029): send the last one
+         *     as `Last-Event-ID` to `GET .../events` after a dropped connection to get only what was missed.
          *     The server owns the run (ADR-007): closing this stream only stops listening.
          *     Reattach with `GET .../events`; stop the run with `POST .../abort`.
          */
@@ -174,12 +174,13 @@ export interface paths {
         };
         /**
          * Watch Session
-         * @description Attach to the session's run: a `run_snapshot` first, then live events until the run ends.
+         * @description Attach to the session's run, on whichever server drives it: a `run_snapshot`, then live events until it ends.
          *
-         *     With `Last-Event-ID` from this run (ADR-028), the stream skips the snapshot and sends
-         *     only the events after that id. If they can't be replayed (another run, or too old),
-         *     it falls back to a snapshot. With no run in progress, the stream is one snapshot of
-         *     the saved transcript.
+         *     With `Last-Event-ID` (ADR-028), the stream skips the snapshot and sends only the events
+         *     after that id, also when the run has ended since: then they finish with its `agent_end`,
+         *     so a client cut off by a server that stopped still learns why. If they can't be replayed
+         *     (another run, or too old), it falls back to a snapshot. With no run in progress, the
+         *     stream is one snapshot of the saved transcript.
          */
         get: operations["watch_session_sessions__session_id__events_get"];
         put?: never;
@@ -202,6 +203,8 @@ export interface paths {
         /**
          * Steer Run
          * @description Queue a message for the model to see after the current turn; it shows up as a `message_end` when it does.
+         *
+         *     A run that is already ending drops it: the client gets back what the run never picked up.
          */
         post: operations["steer_run_sessions__session_id__steer_post"];
         delete?: never;
@@ -242,6 +245,8 @@ export interface paths {
         /**
          * Abort Run
          * @description Stop the session's run; finished messages are kept. 409 if nothing is running.
+         *
+         *     204 once it has stopped; 202 if the server driving it hasn't confirmed within a few seconds (ADR-029).
          */
         post: operations["abort_run_sessions__session_id__abort_post"];
         delete?: never;
@@ -590,7 +595,7 @@ export interface components {
             from_provider: boolean;
         };
         /** @enum {string} */
-        EndReason: "done" | "max_turns" | "error" | "aborted" | "terminated" | "finish_turn";
+        EndReason: "done" | "max_turns" | "error" | "aborted" | "terminated" | "finish_turn" | "interrupted";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1744,6 +1749,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description The stop is on its way; the run's stream ends when it lands. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Successful Response */
             204: {
                 headers: {

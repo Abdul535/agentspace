@@ -5,12 +5,11 @@ from pathlib import Path
 from typing import cast
 
 import httpx
+import pg
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pg import db_rows
-from sqlalchemy.ext.asyncio import async_sessionmaker
-from sqlmodel.ext.asyncio.session import AsyncSession
 from test_auth import SUPABASE_URL, FixedKeys, auth, make_token
 
 from agentspace.ai.key_check import KeyVerdict, check_openrouter_key
@@ -22,7 +21,6 @@ from agentspace.api.provider_keys import key_checker
 from agentspace.auth import TokenVerifier
 from agentspace.config import Settings
 from agentspace.main import create_app
-from agentspace.runs import ActiveRun, RunManager, TooManyRunsError
 from agentspace.session.db import create_engine, session_factory
 from agentspace.session.models import UserRow
 
@@ -168,34 +166,16 @@ def test_signed_in_mode_never_seeds_the_env_key(tmp_path: Path, verdicts: Verdic
         assert entry(client, ALICE)["last4"] is None
 
 
-@pytest.mark.anyio
-async def test_run_manager_caps_runs_per_user() -> None:
-    # Claiming never opens the DB, so there is none.
-    runs = RunManager(cast(async_sessionmaker[AsyncSession], None), max_per_user=1)
-
-    async def no_history() -> list:
-        return []
-
-    first = await runs.claim("s1", no_history, "alice")
-    with pytest.raises(TooManyRunsError):
-        await runs.claim("s2", no_history, "alice")
-    # Another user's runs don't count against Alice.
-    await runs.claim("s3", no_history, "bob")
-    runs.release(first)
-    await runs.claim("s2", no_history, "alice")
-
-
 def test_one_run_too_many_is_a_429(tmp_path: Path, verdicts: Verdicts) -> None:
     fake = FakeProvider([text_reply("hi")])
     settings = Settings(_env_file=None, data_dir=tmp_path, max_runs_per_user=1)
     with make_client(settings, verdicts) as client:
         cast(FastAPI, client.app).dependency_overrides[provider_lookup] = lambda: lambda name: fake
         busy, other = (client.post("/sessions", json={}).json()["id"] for _ in range(2))
-        runs = cast(FastAPI, client.app).state.runs
-        runs.runs[busy] = ActiveRun(session_id=busy, messages=[], history_size=0)
+        run_id = pg.mark_running(busy)
         response = client.post(f"/sessions/{other}/messages", json={"content": "hi"})
         assert response.status_code == 429 and response.json()["detail"]["code"] == "too_many_runs"
-        del runs.runs[busy]
+        pg.mark_done(run_id)
         assert client.post(f"/sessions/{other}/messages", json={"content": "hi"}).status_code == 200
 
 
