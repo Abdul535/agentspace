@@ -26,13 +26,16 @@ class Settings(BaseSettings):
     """The longest one SQL statement may run before Postgres cancels it."""
     redis_url: str = "redis://127.0.0.1:55379/0"
     """Redis for run events and stop/steer requests, shared by every API server (ADR-029). The default is the
-    local one `pnpm dev:api` starts; production points at ElastiCache."""
+    local one `pnpm dev:api` starts; production points at Upstash (`rediss://`, ADR-030)."""
     redis_prefix: str = "agentspace:"
     """Starts every Redis key, so tests (or two apps) can share one Redis without seeing each other's keys."""
     run_heartbeat_seconds: float = Field(default=5, gt=0)
     """How often a server checks in for its runs and looks for runs whose server went silent."""
     run_stale_seconds: float = Field(default=30, gt=0)
     """How long a run's server may stay silent before the run is marked interrupted."""
+    shutdown_grace_seconds: float = Field(default=0, ge=0)
+    """On shutdown (a deploy's SIGTERM), how long running runs may go on to finish before the rest are interrupted.
+    0 locally, so a reload is instant; production sets it below ECS's `stopTimeout` (ADR-030)."""
 
     default_provider: str = "openrouter"
     default_model: str = "anthropic/claude-sonnet-5.5"

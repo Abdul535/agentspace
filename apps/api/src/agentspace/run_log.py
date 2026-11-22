@@ -23,9 +23,12 @@ REPLAY_SIZE = 10_000
 KEEP_SECONDS = 3600
 """How long a Stream outlives the run that wrote it, or the server that read it."""
 BLOCK_MS = 5_000
-"""How long one read waits for new entries before it asks again."""
-SOCKET_TIMEOUT_SECONDS = BLOCK_MS / 1000 + 10
-"""How long the client waits on Redis for a reply; well over `BLOCK_MS`, or a quiet read fails as a timeout."""
+"""How long one read of a run's events waits before it asks again (and checks the run is still alive)."""
+CONTROL_BLOCK_MS = 30_000
+"""How long one read of a server's control Stream waits; long, since an idle server repeats it all day and hosted
+Redis bills each read (ADR-030). A request still arrives at once: a blocked read returns as soon as one is written."""
+SOCKET_TIMEOUT_SECONDS = max(BLOCK_MS, CONTROL_BLOCK_MS) / 1000 + 10
+"""How long the client waits on Redis for a reply; well over the longest block, or a quiet read fails as a timeout."""
 PAGE = 200
 """Entries read per round when looking back for a checkpoint."""
 
@@ -202,8 +205,8 @@ class RunLog:
             await pipe.execute()
 
     async def requests(self, owner: str, after: str) -> list[Control]:
-        """Requests for `owner`'s runs after entry `after`, waiting up to `BLOCK_MS` for one."""
-        reply = await self.redis.xread({self.control_key(owner): after}, count=100, block=BLOCK_MS)
+        """Requests for `owner`'s runs after entry `after`, waiting up to `CONTROL_BLOCK_MS` for one."""
+        reply = await self.redis.xread({self.control_key(owner): after}, count=100, block=CONTROL_BLOCK_MS)
         return [
             Control(id=entry_id, run=fields["run"], kind=cast(ControlKind, fields["kind"]), content=fields["content"])
             for entry_id, fields in entries(reply)

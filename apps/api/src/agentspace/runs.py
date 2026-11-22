@@ -551,7 +551,6 @@ class RunManager:
             alive = set(result.scalars().all())
             await db.commit()
             await self.sweep(db)
-        await self.log.keep(self.owner)
         for run_id, run in before.items():
             # Swept while we were silent (paused, cut off): another server already ended it, so stop driving it.
             if run_id not in alive and run.task is not None and not run.task.done():
@@ -568,6 +567,8 @@ class RunManager:
                 for request in await self.log.requests(self.owner, after):
                     after = request.id
                     self.handle(request)
+                # Once per read, not per heartbeat: at most every `CONTROL_BLOCK_MS`, well inside the Stream's hour.
+                await self.log.keep(self.owner)
             except Exception:
                 log.exception("Reading this server's control Stream failed")
                 await asyncio.sleep(1)
@@ -585,11 +586,20 @@ class RunManager:
         else:
             run.queue(request.kind, UserMessage(content=request.content))
 
-    async def shutdown(self) -> None:
-        """Stop every run as interrupted (the user stopped nothing) and wait, so none is cut off mid-write."""
+    async def shutdown(self, grace_seconds: float = 0) -> None:
+        """Let runs finish for up to `grace_seconds`, then stop the rest as interrupted (the user stopped nothing)."""
+        running = [run for run in self.runs.values() if run.task is not None]
+        # Check-ins and stop/steer requests keep working during the grace period, so a finishing run behaves as usual.
+        if running and grace_seconds > 0:
+            log.info("Shutting down: waiting up to %ss for %d run(s) to finish", grace_seconds, len(running))
+            # TS: like Promise.race of all runs settling against a timeout; returns instead of raising on the timeout.
+            waits = [asyncio.create_task(run.done.wait()) for run in running]
+            _, late = await asyncio.wait(waits, timeout=grace_seconds)
+            for wait in late:
+                wait.cancel()
         for task in self.background:
             task.cancel()
-        running = [run for run in self.runs.values() if run.task is not None]
+        running = [run for run in self.runs.values() if run.task is not None and not run.done.is_set()]
         for run in running:
             run.stop_reason = "interrupted"
             assert run.task is not None  # narrowed above, but not across the loop for the type checker
