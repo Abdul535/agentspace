@@ -93,7 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.mcp.start()
         yield
-        await app.state.runs.shutdown()
+        await app.state.runs.shutdown(settings.shutdown_grace_seconds)
         await app.state.mcp.shutdown()
         # After the runs stop, so their last observations are sent too; off the event loop, since it blocks.
         await asyncify(tracer.shutdown)()

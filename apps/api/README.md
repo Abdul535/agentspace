@@ -42,8 +42,21 @@ refuses a request whose cap is above what the key's remaining credit covers), `A
 `LANGFUSE_BASE_URL` defaults to the EU cloud, `https://us.cloud.langfuse.com` for the US one),
 `AGENTSPACE_SUPABASE_URL` (set: every route but `/health` needs a Supabase sign-in token, ADR-024),
 `AGENTSPACE_SECRET_KEY` (encrypts MCP env values, ADR-025; at least 32 characters, e.g. `openssl rand -base64 32`;
-unset, one is generated into `<data_dir>/secret.key`). See
+unset, one is generated into `<data_dir>/secret.key`), `AGENTSPACE_SHUTDOWN_GRACE_SECONDS` (default `0`; how long
+running replies may finish on shutdown before they end as interrupted, ADR-030). See
 `src/agentspace/config.py`.
+
+## Deploy
+
+One image for the service and the migration task (ADR-030):
+
+```bash
+docker build -t agentspace-api apps/api                         # from the repo root
+docker run --rm --entrypoint alembic agentspace-api upgrade head # the one-off migration task
+docker run -p 8000:8000 agentspace-api                           # the service (uvicorn on 8000)
+```
+
+Production settings are in ADR-030; `AGENTSPACE_SECRET_KEY` is required there.
 
 ## Develop
 

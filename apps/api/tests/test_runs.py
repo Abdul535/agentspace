@@ -453,9 +453,10 @@ def test_a_stream_ends_when_its_run_ended_without_telling_redis(
 
 
 def test_redis_waits_longer_than_a_blocking_read(client: TestClient) -> None:
-    # A read blocks up to `BLOCK_MS` for events; a socket timeout under that would fail every quiet stream.
+    # Reads block up to `BLOCK_MS` (events) or `CONTROL_BLOCK_MS` (requests); a shorter socket timeout would fail them.
     timeout = runs_of(client).log.redis.connection_pool.connection_kwargs["socket_timeout"]
     assert timeout > agentspace.run_log.BLOCK_MS / 1000
+    assert timeout > agentspace.run_log.CONTROL_BLOCK_MS / 1000
 
 
 def test_a_quiet_stream_gets_a_heartbeat_comment(
@@ -545,6 +546,31 @@ def test_a_run_whose_server_went_silent_ends_as_interrupted(tmp_path: Path, prov
         # When A checks in again, it finds the run ended elsewhere and stops driving it.
         portal(a).call(runs_of(a).beat)
         wait_for(lambda: not runs_of(a).owns(session_id))
+        assert run_statuses(session_id) == ["interrupted"]
+
+
+def test_a_server_that_shuts_down_lets_its_runs_finish_within_the_grace_period(
+    tmp_path: Path, provider: GatedProvider
+) -> None:
+    with make_client(tmp_path, provider) as a:
+        session_id = a.post("/sessions", json={}).json()["id"]
+        post = in_background(lambda: a.post(f"/sessions/{session_id}/messages", json={"content": "hi"}))
+        assert provider.waiting.wait(5)
+        # The reply finishes while the server is shutting down, as one does during a deploy's drain.
+        threading.Timer(0.2, lambda: portal(a).call(provider.gate.set)).start()
+        portal(a).call(runs_of(a).shutdown, 5)
+        post["thread"].join(5)
+        assert sse_events(post["result"].text)[-1]["reason"] == "done"
+        assert run_statuses(session_id) == ["done"]
+
+
+def test_a_run_still_going_when_the_grace_period_ends_is_interrupted(tmp_path: Path, provider: GatedProvider) -> None:
+    with make_client(tmp_path, provider) as a:
+        session_id = a.post("/sessions", json={}).json()["id"]
+        post = in_background(lambda: a.post(f"/sessions/{session_id}/messages", json={"content": "hi"}))
+        assert provider.waiting.wait(5)
+        portal(a).call(runs_of(a).shutdown, 0.2)
+        post["thread"].join(5)
         assert run_statuses(session_id) == ["interrupted"]
 
 
