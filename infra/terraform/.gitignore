@@ -1,0 +1,4 @@
+# Terraform: provider downloads and any local state (state lives in S3, ADR-031)
+.terraform/
+*.tfstate
+*.tfstate.*
