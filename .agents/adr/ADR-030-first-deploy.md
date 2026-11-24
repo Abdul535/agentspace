@@ -1,6 +1,6 @@
 # ADR-030 — First deploy: one API task on ECS Fargate, Upstash Redis, web on Vercel, a drain on SIGTERM
 
-- **Status:** Accepted
+- **Status:** Accepted; §4 (infrastructure set up by hand) superseded by ADR-031
 - **Date:** 2026-11-22
 - **Deciders:** project owner
 
