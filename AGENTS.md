@@ -11,6 +11,8 @@ Coding-agent skills live in `.agents/skills/`, with a symlink per skill in `.cla
 
 ## Rules
 
+Before writing or reviewing code, read `.agents/CODING_STANDARDS.md`: production code for thousands of users: deep modules, sad paths, races, scale, tests, and what "done" means.
+
 Build agents from scratch, with no agent framework (no LangChain, LlamaIndex, CrewAI, Agent SDKs, etc.): the agent loop, tool calling, provider adapters, skills and sessions are our own code. Use pi (MIT, upstream clone at `../pi-upstream`, from https://github.com/earendil-works/pi) and opencode (MIT, clone at `../opencode`, from https://github.com/anomalyco/opencode) and CompanyOS (Elastic License 2.0, clone at `../CompanyOS`, from https://github.com/kortix-ai/CompanyOS) and OpenMausBot (Apache 2.0, clone at `../OpenMausBot`, from https://github.com/milind-soni/OpenMausBot) as the reference designs: read how they do a thing before building ours, then write our own version. Don't vendor or import their packages. Build only what the user asks for, one step at a time.
 
 UX is something we can't compromise on. Every UI change must leave the user knowing what happened and what they can do next: a disabled control says why on hover and focus (a real tooltip, not only a `title`), loading, empty and error states are designed rather than left blank, and nothing flickers or changes state without a visible cue. A feature that works but confuses the user is not done.
