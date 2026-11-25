@@ -32,6 +32,7 @@ from agentspace.mcp.manager import McpManager, ServerConfig
 from agentspace.runs import ActiveRun, LoopFn
 from agentspace.session.models import SessionRow
 from agentspace.tools import allows_mcp, build_tools
+from agentspace.workspace.local import LocalWorkspace
 
 
 # TS: `frozen=True` makes instances read-only, like `Readonly<{...}>` enforced at runtime.
@@ -153,7 +154,7 @@ def run_recipe(
             # A copy: the run appends to its own list as messages finish.
             history=build_context(active.messages),
             prompt=message,
-            ctx=ToolContext(workspace=run.workspace, read_roots=tuple(skill.base_dir for skill in skills)),
+            ctx=ToolContext(workspace=LocalWorkspace(run.workspace, read_roots=[skill.base_dir for skill in skills])),
             max_turns=settings.max_turns,
             max_tokens=settings.max_output_tokens,
             thinking_level=session.thinking_level,

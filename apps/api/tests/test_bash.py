@@ -10,15 +10,21 @@ from agentspace.ai.messages import joined_text
 from agentspace.tools import TOOL_SETS, build_tools
 from agentspace.tools.bash import BashParams, BashTool, read_tail
 from agentspace.tools.read import MAX_BYTES, MAX_LINES
+from agentspace.workspace.local import LocalWorkspace
 
 pytestmark = pytest.mark.anyio
 
 
 @pytest.fixture
-def ctx(tmp_path: Path) -> ToolContext:
+def ws(tmp_path: Path) -> Path:
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    return ToolContext(workspace=workspace)
+    return workspace
+
+
+@pytest.fixture
+def ctx(ws: Path) -> ToolContext:
+    return ToolContext(workspace=LocalWorkspace(ws))
 
 
 async def bash(ctx: ToolContext, command: str, timeout: float | None = None) -> ToolResult:
@@ -29,9 +35,9 @@ def text(result: ToolResult) -> str:
     return joined_text(result.content)
 
 
-async def test_runs_in_the_workspace_with_stdout_and_stderr(ctx: ToolContext) -> None:
+async def test_runs_in_the_workspace_with_stdout_and_stderr(ctx: ToolContext, ws: Path) -> None:
     result = await bash(ctx, "pwd; echo oops >&2")
-    assert text(result) == f"{ctx.workspace.resolve()}\noops"
+    assert text(result) == f"{ws.resolve()}\noops"
     assert not result.is_error
     assert result.details is not None and result.details["exit_code"] == 0 and not result.details["truncated"]
 
@@ -59,17 +65,17 @@ async def test_timeout_kills_the_command_and_keeps_its_output(ctx: ToolContext) 
     assert result.details is not None and result.details["exit_code"] is None
 
 
-async def test_background_children_do_not_block_and_are_killed(ctx: ToolContext) -> None:
+async def test_background_children_do_not_block_and_are_killed(ctx: ToolContext, ws: Path) -> None:
     started = time.monotonic()
     result = await bash(ctx, "(sleep 30; touch late.txt) & echo $! > bg.pid; echo done")
     assert time.monotonic() - started < 5
     assert text(result) == "done"
-    assert_dead(int((ctx.workspace / "bg.pid").read_text()))
+    assert_dead(int((ws / "bg.pid").read_text()))
 
 
-async def test_cancelling_the_run_kills_the_command(ctx: ToolContext) -> None:
+async def test_cancelling_the_run_kills_the_command(ctx: ToolContext, ws: Path) -> None:
     task = asyncio.create_task(bash(ctx, "echo $$ > sh.pid; sleep 30"))
-    pid_file = ctx.workspace / "sh.pid"
+    pid_file = ws / "sh.pid"
     while not pid_file.exists() or not pid_file.read_text():
         await asyncio.sleep(0.01)
     task.cancel()

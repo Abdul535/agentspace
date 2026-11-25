@@ -17,6 +17,7 @@ from agentspace.main import create_app
 from agentspace.mcp.client import CallToolResult, McpError, StdioClient
 from agentspace.mcp.manager import McpManager, ServerConfig
 from agentspace.mcp.tools import McpArgs, McpTool, convert_result, cut_middle, mcp_tool_name
+from agentspace.workspace.local import LocalWorkspace
 
 ADMIN_TOKEN = "test-admin-token"
 FAKE_SERVER = str(Path(__file__).parent / "fixtures" / "fake_mcp_server.py")
@@ -123,7 +124,7 @@ async def test_manager_gives_tools_reconnects_after_a_crash_and_drops_removed_se
         assert "mcp__fake__echo" in by_name
         echo, crash = by_name["mcp__fake__echo"], by_name["mcp__fake__crash"]
         assert echo.spec().parameters["required"] == ["text"]
-        ctx = ToolContext(workspace=tmp_path)
+        ctx = ToolContext(workspace=LocalWorkspace(tmp_path))
 
         result = await echo.execute(McpArgs.model_validate({"text": "hi"}), ctx)
         assert result.content == [TextContent(text="hi")] and result.details == {"server": "fake", "tool": "echo"}
@@ -148,10 +149,10 @@ async def test_a_server_error_result_and_a_timeout_are_tool_errors(tmp_path: Pat
     try:
         tools = {t.name: t for t in await manager.tools_for("s1", tmp_path, [fake_config()])}
         assert isinstance(tools["mcp__fake__fail"], McpTool)
-        failed = await tools["mcp__fake__fail"].execute(McpArgs(), ToolContext(workspace=tmp_path))
+        failed = await tools["mcp__fake__fail"].execute(McpArgs(), ToolContext(workspace=LocalWorkspace(tmp_path)))
         assert failed.is_error and failed.content == [TextContent(text="it broke")]
         with pytest.raises(ToolError, match="timed out"):
-            await tools["mcp__fake__slow"].execute(McpArgs(), ToolContext(workspace=tmp_path))
+            await tools["mcp__fake__slow"].execute(McpArgs(), ToolContext(workspace=LocalWorkspace(tmp_path)))
     finally:
         await manager.shutdown()
 

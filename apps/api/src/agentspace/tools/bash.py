@@ -1,13 +1,12 @@
 """The `bash` tool, after pi's `packages/coding-agent/src/core/tools/bash.ts`.
 
-Commands run on the host as the API's user, with the workspace as working directory.
-That is not a sandbox: a command can reach anything the API's user can (ADR-003 step 3).
+The workspace runs the command (ADR-004); `LocalWorkspace` runs it on the host as the API's user,
+which is not a sandbox. This module shapes the output: live updates, the tail the model sees, the log.
 """
 
 import asyncio
 import contextlib
 import os
-import signal
 import tempfile
 import time
 from pathlib import Path
@@ -20,8 +19,6 @@ from agentspace.agent.tool import OnUpdate, Tool, ToolContext, ToolResult
 from agentspace.ai.messages import TextContent
 from agentspace.tools.read import MAX_BYTES, MAX_LINES
 
-# Environment variables a command inherits; everything else (API keys included) stays with the server.
-ENV_ALLOWLIST = ("PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL", "TERM", "TMPDIR")
 # Bytes read from the end of the output; twice the cap so a partial first line can be dropped.
 TAIL_BYTES = 2 * MAX_BYTES
 CHUNK_BYTES = 64 * 1024
@@ -60,7 +57,7 @@ class BashTool(Tool[BashParams]):
         exit_code: int | None = None
         watcher = asyncio.create_task(watch_output(log, ctx.on_update)) if ctx.on_update else None
         try:
-            exit_code = await run_command(args.command, ctx.workspace, args.timeout, log)
+            exit_code = await ctx.workspace.exec(args.command, timeout=args.timeout, output=log)
         except TimeoutError:
             pass  # `exit_code` stays None; reported below with the output so far
         except asyncio.CancelledError:
@@ -117,51 +114,6 @@ def new_log_file() -> Path:
     fd, name = tempfile.mkstemp(prefix="agentspace-bash-", suffix=".log")
     os.close(fd)
     return Path(name)
-
-
-async def run_command(command: str, cwd: Path, timeout: float | None, log: Path) -> int:
-    """Run `command` to completion with its output written to `log`; returns the exit code.
-
-    Raises `TimeoutError` after `timeout` seconds. Whatever happens, the whole
-    process group is killed at the end, so no child of the command keeps running.
-    """
-    # The command writes straight to the file: no pipe for a background child to hold open, which
-    # would make `proc.wait()` hang (asyncio waits for pipes to close), and no writes on the event loop.
-    # TS: `with` closes the file when the block ends, like `using` / try-finally.
-    with log.open("wb") as out:
-        # TS: like child_process.spawn("bash", ["-c", command], { detached: true, ... }).
-        proc = await asyncio.create_subprocess_exec(
-            "bash",
-            "-c",
-            command,
-            cwd=cwd,
-            env={key: os.environ[key] for key in ENV_ALLOWLIST if key in os.environ},  # TS: a dict comprehension
-            stdin=asyncio.subprocess.DEVNULL,
-            stdout=out,
-            stderr=asyncio.subprocess.STDOUT,  # one stream, in the order the command wrote it
-            start_new_session=True,  # own process group, so killpg reaches every child
-        )
-    try:
-        # TS: asyncio.timeout(None) never fires, like skipping the setTimeout.
-        async with asyncio.timeout(timeout):
-            await proc.wait()
-    finally:
-        # Background children outlive the shell; on timeout or cancellation the shell is still running too.
-        kill_group(proc.pid)
-        if proc.returncode is None:
-            await proc.wait()
-    code = proc.returncode
-    assert code is not None  # set once wait() returned; the assert tells the type checker
-    # A signal-killed shell reports -N; report 128 + N as shells do, so it never reads as success.
-    return code if code >= 0 else 128 - code
-
-
-def kill_group(pid: int) -> None:
-    """SIGKILL every process in the command's group; fine if they are already gone."""
-    try:
-        os.killpg(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError):  # TS: a tuple catches either class, like two instanceof checks
-        pass
 
 
 def render_output(log: Path) -> tuple[str, dict[str, Any]]:

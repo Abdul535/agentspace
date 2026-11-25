@@ -1,6 +1,6 @@
 # ADR-004 — Tool execution behind a Workspace protocol, with a sandbox per session
 
-- **Status:** Proposed
+- **Status:** Proposed; its `Workspace` interface sketch is replaced by ADR-034 (built)
 - **Date:** 2026-11-17
 - **Deciders:** project owner
 

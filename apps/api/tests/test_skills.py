@@ -15,6 +15,7 @@ from agentspace.tools import TOOL_SETS, build_tools
 from agentspace.tools.ls import LsParams, LsTool
 from agentspace.tools.read import ReadParams, ReadTool
 from agentspace.tools.write import WriteParams, WriteTool
+from agentspace.workspace.local import LocalWorkspace
 
 
 def make_skill(folder: Path, frontmatter: str, body: str = "Do the thing.\n") -> Path:
@@ -107,7 +108,7 @@ def skill_ctx(tmp_path: Path) -> ToolContext:
     make_skill(tmp_path / "skills" / "pdf", "description: PDFs.", body="Step one.\n")
     (tmp_path / "skills" / "pdf" / "notes.md").write_text("ref")
     (tmp_path / "skills" / "secret.txt").write_text("not a skill")
-    return ToolContext(workspace=workspace, read_roots=((tmp_path / "skills" / "pdf").resolve(),))
+    return ToolContext(workspace=LocalWorkspace(workspace, read_roots=[(tmp_path / "skills" / "pdf").resolve()]))
 
 
 @pytest.mark.anyio

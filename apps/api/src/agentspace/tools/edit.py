@@ -6,15 +6,11 @@ pi also retries a failed match with fuzzy normalization (smart quotes, trailing 
 import difflib
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Annotated, Any
 
-from asyncer import asyncify
 from pydantic import BaseModel, Field
 
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
-from agentspace.tools.file_lock import file_lock
-from agentspace.tools.paths import resolve_in_workspace
 
 BOM = "﻿"
 
@@ -97,11 +93,9 @@ class EditTool(Tool[EditParams]):
 
     async def execute(self, args: EditParams, ctx: ToolContext) -> ToolResult:
         """Apply the edits off the event loop; `details` carries a unified diff of the change."""
-        path = resolve_in_workspace(ctx.workspace, args.path)
-        # TS: edit_file blocks (fs.readFileSync/writeFileSync); asyncify runs it on a worker thread and awaits it.
-        # The whole read-modify-write holds the file's lock, so a parallel edit can't overwrite it in between.
-        async with file_lock(path):
-            return await asyncify(edit_file)(path, args.path, args.edits)
+        # The workspace holds the file's lock for the whole read-modify-write, so a parallel edit can't
+        # overwrite it in between.
+        return await ctx.workspace.update_file(args.path, lambda raw: edit_bytes(raw, args.path, args.edits))
 
 
 def snake_case_edit(edit: dict[str, Any]) -> dict[str, Any]:
@@ -123,14 +117,12 @@ class Match:
     new_text: str
 
 
-def edit_file(path: Path, shown_path: str, edits: list[Replacement]) -> ToolResult:
-    """Read the file, apply every edit against the original text, write it back, and describe the change."""
-    if not path.exists():
+def edit_bytes(data: bytes | None, shown_path: str, edits: list[Replacement]) -> tuple[bytes, ToolResult]:
+    """The file's new bytes with every edit applied against the original text, and a result describing the change."""
+    if data is None:
         raise ToolError(f"File not found: {shown_path}")
-    if path.is_dir():
-        raise ToolError(f"{shown_path} is a directory, not a file.")
     try:
-        raw = path.read_bytes().decode("utf-8")  # TS: unlike TextDecoder's default, this throws on invalid bytes
+        raw = data.decode("utf-8")  # TS: unlike TextDecoder's default, this throws on invalid bytes
     except UnicodeDecodeError:
         raise ToolError(f"{shown_path} is not UTF-8 text; only text files can be edited.") from None
 
@@ -140,13 +132,13 @@ def edit_file(path: Path, shown_path: str, edits: list[Replacement]) -> ToolResu
     old = raw.removeprefix(BOM).replace("\r\n", "\n")
 
     new = apply_edits(old, edits, shown_path)
-    path.write_bytes((bom + new.replace("\n", eol)).encode())
 
     patch = "".join(
         difflib.unified_diff(old.splitlines(keepends=True), new.splitlines(keepends=True), shown_path, shown_path, n=4)
     )
     details: dict[str, Any] = {"path": shown_path, "patch": patch, "first_changed_line": first_changed_line(old, new)}
-    return ToolResult.text(f"Successfully replaced {len(edits)} block(s) in {shown_path}.", details)
+    result = ToolResult.text(f"Successfully replaced {len(edits)} block(s) in {shown_path}.", details)
+    return (bom + new.replace("\n", eol)).encode(), result
 
 
 def apply_edits(text: str, edits: list[Replacement], shown_path: str) -> str:

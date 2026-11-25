@@ -40,6 +40,7 @@ from agentspace.ai.messages import (
 from agentspace.ai.provider import AssistantEvent, Context, TextDeltaEvent, prepare_transcript
 from agentspace.ai.providers.fake import FakeProvider, Reply, text_reply, tool_reply
 from agentspace.tools import TOOL_SETS, build_tools
+from agentspace.workspace.local import LocalWorkspace
 
 pytestmark = pytest.mark.anyio
 
@@ -61,7 +62,7 @@ async def run(
             tools=build_tools(TOOL_SETS["all"], bash=True) if tools is None else tools,
             history=[],
             prompt=UserMessage(content=prompt),
-            ctx=ToolContext(workspace=workspace),
+            ctx=ToolContext(workspace=LocalWorkspace(workspace)),
             max_turns=max_turns,
             config=config,
         )
@@ -379,7 +380,7 @@ async def test_run_loop_reports_the_same_events_through_emit(tmp_path: Path) -> 
         tools=[EchoTool()],
         history=[],
         prompt=UserMessage(content="go"),
-        ctx=ToolContext(workspace=tmp_path),
+        ctx=ToolContext(workspace=LocalWorkspace(tmp_path)),
         max_turns=10,
         emit=emit,
     )
@@ -430,7 +431,7 @@ async def test_closing_the_reader_early_cancels_the_running_tool(tmp_path: Path)
         tools=[slow],
         history=[],
         prompt=UserMessage(content="go"),
-        ctx=ToolContext(workspace=tmp_path),
+        ctx=ToolContext(workspace=LocalWorkspace(tmp_path)),
         max_turns=10,
     )
     # Read until the call starts, wait for the tool to be running, then stop reading, as a disconnected client does.
@@ -870,7 +871,7 @@ async def continue_run(provider: FakeProvider, workspace: Path, history: list[Me
             tools=build_tools(TOOL_SETS["all"], bash=True),
             history=history,
             prompt=None,
-            ctx=ToolContext(workspace=workspace),
+            ctx=ToolContext(workspace=LocalWorkspace(workspace)),
             max_turns=10,
         )
     ]
@@ -955,7 +956,7 @@ async def test_the_model_gets_what_convert_to_llm_returns(tmp_path: Path) -> Non
             tools=[],
             history=[NoticeMessage(text="switched")],
             prompt=UserMessage(content="hi"),
-            ctx=ToolContext(workspace=tmp_path),
+            ctx=ToolContext(workspace=LocalWorkspace(tmp_path)),
             max_turns=1,
             config=LoopConfig(convert_to_llm=notices_as_user_messages),
         )

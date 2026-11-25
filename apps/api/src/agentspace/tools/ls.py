@@ -1,15 +1,13 @@
 """The `ls` tool: list one directory, after pi's `packages/coding-agent/src/core/tools/ls.ts`."""
 
-from pathlib import Path
 from typing import Annotated
 
-from asyncer import asyncify
 from pydantic import BaseModel, Field
 
-from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
+from agentspace.agent.tool import Tool, ToolContext, ToolResult
 from agentspace.tools.output import head_within_cap, with_notices
-from agentspace.tools.paths import resolve_readable
 from agentspace.tools.read import MAX_BYTES
+from agentspace.workspace import DirEntry
 
 DEFAULT_LIMIT = 500
 
@@ -39,24 +37,15 @@ class LsTool(Tool[LsParams]):
     snippet = "List directory contents"
 
     async def execute(self, args: LsParams, ctx: ToolContext) -> ToolResult:
-        """Read the directory off the event loop."""
-        shown_path = args.path or "."
-        target = resolve_readable(ctx.workspace, ctx.read_roots, shown_path)
-        # TS: os.scandir blocks (like fs.readdirSync); asyncify runs it on a worker thread and awaits it.
-        return await asyncify(list_dir)(target, shown_path, args.limit)
+        """List the directory through the workspace."""
+        return render_listing(await ctx.workspace.list_dir(args.path or "."), args.limit)
 
 
-def list_dir(target: Path, shown_path: str, limit: int) -> ToolResult:
+def render_listing(found: list[DirEntry], limit: int) -> ToolResult:
     """The first `limit` entries, case-insensitively sorted, with notices for anything cut."""
-    if not target.exists():
-        raise ToolError(f"Path not found: {shown_path}")
-    if not target.is_dir():
-        raise ToolError(f"Not a directory: {shown_path}")
-
     # TS: sorted(..., key=f) sorts by f(x), like .sort((a, b) => f(a).localeCompare(f(b))).
-    children = sorted(target.iterdir(), key=lambda p: p.name.lower())
-    # is_dir() follows symlinks, so a link to a folder is listed as one.
-    entries = [child.name + ("/" if child.is_dir() else "") for child in children[:limit]]
+    children = sorted(found, key=lambda entry: entry.name.lower())
+    entries = [child.name + ("/" if child.is_dir else "") for child in children[:limit]]
     if not entries:
         return ToolResult.text("(empty directory)", {"count": 0})
 

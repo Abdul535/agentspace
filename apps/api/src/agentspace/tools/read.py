@@ -1,6 +1,5 @@
 """The `read` tool: text pages with the limits of pi's `tools/read.ts`, and images (ADR-015)."""
 
-from pathlib import Path
 from typing import Annotated, Any
 
 from asyncer import asyncify
@@ -9,7 +8,6 @@ from pydantic import BaseModel, Field
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
 from agentspace.ai.images import ImageError, process_image, sniff_image
 from agentspace.ai.messages import TextContent
-from agentspace.tools.paths import resolve_readable
 
 # Output caps per call, so one read can't flood the model's context; whichever is hit first wins.
 MAX_LINES = 2000
@@ -43,20 +41,14 @@ class ReadTool(Tool[ReadParams]):
     guidelines = ("Use read to examine files instead of cat or sed.",)
 
     async def execute(self, args: ReadParams, ctx: ToolContext) -> ToolResult:
-        """Read the file off the event loop."""
-        path = resolve_readable(ctx.workspace, ctx.read_roots, args.path)
-        # TS: the file I/O below blocks (like fs.readFileSync); asyncify runs it on a worker thread and awaits it.
-        return await asyncify(read_file)(path, args.path, args.offset, args.limit)
+        """Fetch the file from the workspace, then shape it off the event loop."""
+        data = await ctx.workspace.read_bytes(args.path)  # TS: a Buffer; .decode() later is buffer.toString("utf8")
+        # TS: decoding and resizing images is CPU work; asyncify runs it on a worker thread and awaits it.
+        return await asyncify(render_file)(data, args.path, args.offset, args.limit)
 
 
-def read_file(path: Path, shown_path: str, offset: int | None, limit: int | None) -> ToolResult:
+def render_file(data: bytes, shown_path: str, offset: int | None, limit: int | None) -> ToolResult:
     """An image file as an image, any other file as a page of text."""
-    # TS: f"...{x}..." strings are template literals: `...${x}...`.
-    if not path.exists():
-        raise ToolError(f"File not found: {shown_path}")
-    if path.is_dir():
-        raise ToolError(f"{shown_path} is a directory, not a file.")
-    data = path.read_bytes()  # TS: a Buffer; .decode() below is buffer.toString("utf8")
     # Judged by the bytes, not the name: a `.png` that isn't one is read as text, or refused as binary.
     if sniff_image(data):
         return read_image(data, shown_path)
