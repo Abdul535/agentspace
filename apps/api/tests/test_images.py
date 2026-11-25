@@ -30,6 +30,7 @@ from agentspace.api.deps import get_catalog, provider_lookup
 from agentspace.config import Settings
 from agentspace.main import create_app
 from agentspace.tools.read import ReadParams, ReadTool
+from agentspace.workspace.local import LocalWorkspace
 
 
 def png(width: int = 4, height: int = 3, color: str = "red") -> bytes:
@@ -88,7 +89,7 @@ def test_not_an_image_or_a_broken_one_is_refused() -> None:
 @pytest.mark.anyio
 async def test_read_returns_an_image_with_a_note(tmp_path: Path) -> None:
     (tmp_path / "shot.png").write_bytes(png())
-    result = await ReadTool().execute(ReadParams(path="shot.png"), ToolContext(workspace=tmp_path))
+    result = await ReadTool().execute(ReadParams(path="shot.png"), ToolContext(workspace=LocalWorkspace(tmp_path)))
     note, image = result.content
     assert isinstance(note, TextContent) and note.text == "Read image file [image/png]"
     assert isinstance(image, ImageContent) and image.mime_type == "image/png"
@@ -98,7 +99,7 @@ async def test_read_returns_an_image_with_a_note(tmp_path: Path) -> None:
 @pytest.mark.anyio
 async def test_read_judges_by_content_so_a_fake_png_is_text(tmp_path: Path) -> None:
     (tmp_path / "fake.png").write_text("not really an image")
-    result = await ReadTool().execute(ReadParams(path="fake.png"), ToolContext(workspace=tmp_path))
+    result = await ReadTool().execute(ReadParams(path="fake.png"), ToolContext(workspace=LocalWorkspace(tmp_path)))
     assert joined_text(result.content) == "not really an image"
 
 

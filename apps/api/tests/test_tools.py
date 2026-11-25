@@ -7,18 +7,24 @@ from pydantic import ValidationError
 from agentspace.agent.tool import ToolContext, ToolError, ToolResult
 from agentspace.ai.messages import joined_text
 from agentspace.tools.edit import EditParams, EditTool, Replacement
-from agentspace.tools.file_lock import _entries, file_lock
 from agentspace.tools.read import MAX_BYTES, MAX_LINES, ReadParams, ReadTool
 from agentspace.tools.write import WriteParams, WriteTool
+from agentspace.workspace.file_lock import _entries, file_lock
+from agentspace.workspace.local import LocalWorkspace
 
 pytestmark = pytest.mark.anyio
 
 
 @pytest.fixture
-def ctx(tmp_path: Path) -> ToolContext:
+def ws(tmp_path: Path) -> Path:
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    return ToolContext(workspace=workspace)
+    return workspace
+
+
+@pytest.fixture
+def ctx(ws: Path) -> ToolContext:
+    return ToolContext(workspace=LocalWorkspace(ws))
 
 
 async def read_result(ctx: ToolContext, path: str, offset: int | None = None, limit: int | None = None) -> ToolResult:
@@ -29,58 +35,58 @@ async def read(ctx: ToolContext, path: str, offset: int | None = None, limit: in
     return joined_text((await read_result(ctx, path, offset, limit)).content)
 
 
-async def test_write_creates_parent_dirs_and_read_returns_content(ctx: ToolContext) -> None:
+async def test_write_creates_parent_dirs_and_read_returns_content(ctx: ToolContext, ws: Path) -> None:
     out = await WriteTool().execute(WriteParams(path="a/b/notes.txt", content="one\ntwo\n"), ctx)
     assert joined_text(out.content) == "Wrote 8 bytes to a/b/notes.txt"
     assert out.details == {"path": "a/b/notes.txt", "bytes": 8}
-    assert (ctx.workspace / "a/b/notes.txt").read_text() == "one\ntwo\n"
+    assert (ws / "a/b/notes.txt").read_text() == "one\ntwo\n"
     assert await read(ctx, "a/b/notes.txt") == "one\ntwo"
 
 
-async def test_write_overwrites(ctx: ToolContext) -> None:
+async def test_write_overwrites(ctx: ToolContext, ws: Path) -> None:
     await WriteTool().execute(WriteParams(path="f.txt", content="old"), ctx)
     await WriteTool().execute(WriteParams(path="f.txt", content="new"), ctx)
-    assert (ctx.workspace / "f.txt").read_text() == "new"
+    assert (ws / "f.txt").read_text() == "new"
 
 
-async def test_read_offset_and_limit(ctx: ToolContext) -> None:
-    (ctx.workspace / "f.txt").write_text("\n".join(f"line {i}" for i in range(1, 11)))
+async def test_read_offset_and_limit(ctx: ToolContext, ws: Path) -> None:
+    (ws / "f.txt").write_text("\n".join(f"line {i}" for i in range(1, 11)))
     out = await read(ctx, "f.txt", offset=3, limit=2)
     assert out == "line 3\nline 4\n\n[6 more lines in file. Use offset=5 to continue.]"
     assert await read(ctx, "f.txt", offset=10) == "line 10"
 
 
-async def test_read_details_describe_the_page(ctx: ToolContext) -> None:
-    (ctx.workspace / "f.txt").write_text("\n".join(f"line {i}" for i in range(1, 11)))
+async def test_read_details_describe_the_page(ctx: ToolContext, ws: Path) -> None:
+    (ws / "f.txt").write_text("\n".join(f"line {i}" for i in range(1, 11)))
     page = await read_result(ctx, "f.txt", offset=3, limit=2)
     assert page.details == {"path": "f.txt", "first_line": 3, "last_line": 4, "total_lines": 10, "truncated": True}
     rest = await read_result(ctx, "f.txt", offset=5)
     assert rest.details is not None and rest.details["last_line"] == 10 and not rest.details["truncated"]
 
 
-async def test_read_truncates_at_line_limit(ctx: ToolContext) -> None:
-    (ctx.workspace / "big.txt").write_text("\n".join("x" for _ in range(MAX_LINES + 5)))
+async def test_read_truncates_at_line_limit(ctx: ToolContext, ws: Path) -> None:
+    (ws / "big.txt").write_text("\n".join("x" for _ in range(MAX_LINES + 5)))
     out = await read(ctx, "big.txt")
     assert out.endswith(f"[Showing lines 1-{MAX_LINES} of {MAX_LINES + 5}. Use offset={MAX_LINES + 1} to continue.]")
 
 
-async def test_read_truncates_at_byte_limit(ctx: ToolContext) -> None:
+async def test_read_truncates_at_byte_limit(ctx: ToolContext, ws: Path) -> None:
     line = "y" * 1023  # 1 KiB with the newline
-    (ctx.workspace / "wide.txt").write_text("\n".join(line for _ in range(100)))
+    (ws / "wide.txt").write_text("\n".join(line for _ in range(100)))
     out = await read(ctx, "wide.txt")
     assert f"[Showing lines 1-{MAX_BYTES // 1024} of 100." in out
 
 
-async def test_read_single_line_over_byte_limit(ctx: ToolContext) -> None:
-    (ctx.workspace / "one.txt").write_text("z" * (MAX_BYTES * 2))
+async def test_read_single_line_over_byte_limit(ctx: ToolContext, ws: Path) -> None:
+    (ws / "one.txt").write_text("z" * (MAX_BYTES * 2))
     out = await read(ctx, "one.txt")
     assert "[Line 1 is 100.0KB, over the 50KB limit; showing its first part only.]" in out
 
 
-async def test_read_errors(ctx: ToolContext) -> None:
-    (ctx.workspace / "f.txt").write_text("a\nb")
-    (ctx.workspace / "bin").write_bytes(b"\x00\x01")
-    (ctx.workspace / "empty.txt").write_text("")
+async def test_read_errors(ctx: ToolContext, ws: Path) -> None:
+    (ws / "f.txt").write_text("a\nb")
+    (ws / "bin").write_bytes(b"\x00\x01")
+    (ws / "empty.txt").write_text("")
     with pytest.raises(ToolError, match="File not found"):
         await read(ctx, "missing.txt")
     with pytest.raises(ToolError, match="beyond the end"):
@@ -100,16 +106,16 @@ async def test_paths_outside_workspace_are_refused(ctx: ToolContext, path: str) 
         await WriteTool().execute(WriteParams(path=path, content="x"), ctx)
 
 
-async def test_symlink_out_of_workspace_is_refused(ctx: ToolContext, tmp_path: Path) -> None:
+async def test_symlink_out_of_workspace_is_refused(ctx: ToolContext, ws: Path, tmp_path: Path) -> None:
     (tmp_path / "secret.txt").write_text("secret")
-    (ctx.workspace / "link").symlink_to(tmp_path)
+    (ws / "link").symlink_to(tmp_path)
     with pytest.raises(ToolError, match="outside the workspace"):
         await read(ctx, "link/secret.txt")
 
 
-async def test_absolute_path_inside_workspace_is_allowed(ctx: ToolContext) -> None:
-    (ctx.workspace / "f.txt").write_text("ok")
-    assert await read(ctx, str(ctx.workspace / "f.txt")) == "ok"
+async def test_absolute_path_inside_workspace_is_allowed(ctx: ToolContext, ws: Path) -> None:
+    (ws / "f.txt").write_text("ok")
+    assert await read(ctx, str(ws / "f.txt")) == "ok"
 
 
 async def edit(ctx: ToolContext, path: str, *pairs: tuple[str, str]) -> ToolResult:
@@ -117,24 +123,24 @@ async def edit(ctx: ToolContext, path: str, *pairs: tuple[str, str]) -> ToolResu
     return await EditTool().execute(EditParams(path=path, edits=edits), ctx)
 
 
-async def test_edit_applies_disjoint_edits_against_the_original(ctx: ToolContext) -> None:
-    (ctx.workspace / "f.py").write_text("a = 1\nb = 2\nc = 3\n")
+async def test_edit_applies_disjoint_edits_against_the_original(ctx: ToolContext, ws: Path) -> None:
+    (ws / "f.py").write_text("a = 1\nb = 2\nc = 3\n")
     out = await edit(ctx, "f.py", ("c = 3", "c = 30"), ("a = 1", "a = 10"))
     assert joined_text(out.content) == "Successfully replaced 2 block(s) in f.py."
-    assert (ctx.workspace / "f.py").read_text() == "a = 10\nb = 2\nc = 30\n"
+    assert (ws / "f.py").read_text() == "a = 10\nb = 2\nc = 30\n"
     assert out.details is not None and out.details["first_changed_line"] == 1
     assert "-a = 1\n+a = 10\n" in out.details["patch"] and "+c = 30\n" in out.details["patch"]
 
 
-async def test_edit_keeps_bom_and_crlf(ctx: ToolContext) -> None:
-    (ctx.workspace / "w.txt").write_bytes(b"\xef\xbb\xbfone\r\ntwo\r\nthree\r\n")
+async def test_edit_keeps_bom_and_crlf(ctx: ToolContext, ws: Path) -> None:
+    (ws / "w.txt").write_bytes(b"\xef\xbb\xbfone\r\ntwo\r\nthree\r\n")
     out = await edit(ctx, "w.txt", ("two\nthree", "2\n3"))
-    assert (ctx.workspace / "w.txt").read_bytes() == b"\xef\xbb\xbfone\r\n2\r\n3\r\n"
+    assert (ws / "w.txt").read_bytes() == b"\xef\xbb\xbfone\r\n2\r\n3\r\n"
     assert out.details is not None and out.details["first_changed_line"] == 2
 
 
-async def test_edit_errors(ctx: ToolContext) -> None:
-    (ctx.workspace / "f.txt").write_text("x\nx\ny\nz\n")
+async def test_edit_errors(ctx: ToolContext, ws: Path) -> None:
+    (ws / "f.txt").write_text("x\nx\ny\nz\n")
     with pytest.raises(ToolError, match="Could not find the text"):
         await edit(ctx, "f.txt", ("nope", "q"))
     with pytest.raises(ToolError, match="Found 2 occurrences of the text"):
@@ -149,7 +155,7 @@ async def test_edit_errors(ctx: ToolContext) -> None:
         await edit(ctx, "missing.txt", ("a", "b"))
     with pytest.raises(ToolError, match="outside the workspace"):
         await edit(ctx, "../f.txt", ("a", "b"))
-    assert (ctx.workspace / "f.txt").read_text() == "x\nx\ny\nz\n"
+    assert (ws / "f.txt").read_text() == "x\nx\ny\nz\n"
 
 
 async def test_edit_requires_at_least_one_edit() -> None:

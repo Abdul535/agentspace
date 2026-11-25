@@ -1,14 +1,10 @@
 """The `write` tool, as pi's `packages/coding-agent/src/core/tools/write.ts`."""
 
-from pathlib import Path
 from typing import Annotated
 
-from asyncer import asyncify
 from pydantic import BaseModel, Field
 
-from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
-from agentspace.tools.file_lock import file_lock
-from agentspace.tools.paths import resolve_in_workspace
+from agentspace.agent.tool import Tool, ToolContext, ToolResult
 
 
 class WriteParams(BaseModel):
@@ -32,19 +28,9 @@ class WriteTool(Tool[WriteParams]):
     guidelines = ("Use write only for new files or complete rewrites.",)
 
     async def execute(self, args: WriteParams, ctx: ToolContext) -> ToolResult:
-        """Write the file off the event loop and report how many bytes were written."""
-        path = resolve_in_workspace(ctx.workspace, args.path)
-        # TS: write_text blocks (like fs.writeFileSync); asyncify runs it on a worker thread and awaits it.
-        async with file_lock(path):
-            size = await asyncify(write_text)(path, args.path, args.content)
+        """Write the file as UTF-8, replacing whatever was there, and report how many bytes were written."""
+        data = args.content.encode()
+        # The old content is ignored; going through update_file still waits for an `edit` of the same file.
+        await ctx.workspace.update_file(args.path, lambda _old: (data, None))
+        size = len(data)
         return ToolResult.text(f"Wrote {size} bytes to {args.path}", {"path": args.path, "bytes": size})
-
-
-def write_text(path: Path, shown_path: str, content: str) -> int:
-    """Write UTF-8 text, creating parent folders; returns the byte count."""
-    if path.is_dir():
-        raise ToolError(f"{shown_path} is a directory.")
-    path.parent.mkdir(parents=True, exist_ok=True)  # TS: fs.mkdirSync(dirname, { recursive: true })
-    data = content.encode()
-    path.write_bytes(data)
-    return len(data)

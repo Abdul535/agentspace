@@ -108,7 +108,7 @@ After B the API service can run with desired count > 1 and autoscale.
 After C, `bash`, `grep`/`find` and MCP work again for public users, isolated
 per session, and workspace files survive deploys.
 
-59. [ ] **Workspace protocol, local only** (ADR-004, built). Tools go through
+59. [x] **Workspace protocol, local only** (ADR-004, built; interface in ADR-034). Tools go through
     `Workspace` with `LocalWorkspace` as the only backend. No change users can
     see; the tests prove it.
 28. [ ] **Sandbox per session (ADR)** (ADR-014). `SandboxWorkspace` on Daytona

@@ -8,6 +8,7 @@ from agentspace.ai.messages import joined_text
 from agentspace.tools.find import FindParams, FindTool
 from agentspace.tools.grep import MAX_LINE_CHARS, GrepParams, GrepTool
 from agentspace.tools.ls import LsParams, LsTool
+from agentspace.workspace.local import LocalWorkspace
 
 pytestmark = [
     pytest.mark.anyio,
@@ -16,7 +17,7 @@ pytestmark = [
 
 
 @pytest.fixture
-def ctx(tmp_path: Path) -> ToolContext:
+def ws(tmp_path: Path) -> Path:
     """A workspace with nested, hidden, ignored and git-internal files."""
     ws = tmp_path / "ws"
     for rel, content in {
@@ -33,7 +34,12 @@ def ctx(tmp_path: Path) -> ToolContext:
         path.write_text(content)
     (ws / "outlink").symlink_to(tmp_path)
     (tmp_path / "secret.txt").write_text("hello secret\n")
-    return ToolContext(workspace=ws)
+    return ws
+
+
+@pytest.fixture
+def ctx(ws: Path) -> ToolContext:
+    return ToolContext(workspace=LocalWorkspace(ws))
 
 
 def text(result: ToolResult) -> str:
@@ -71,8 +77,8 @@ async def test_grep_limit_keeps_trailing_context(ctx: ToolContext) -> None:
     assert result.details is not None and result.details["limit_reached"]
 
 
-async def test_grep_cuts_long_lines(ctx: ToolContext) -> None:
-    (ctx.workspace / "long.txt").write_text("needle" + "x" * 1000 + "\n")
+async def test_grep_cuts_long_lines(ctx: ToolContext, ws: Path) -> None:
+    (ws / "long.txt").write_text("needle" + "x" * 1000 + "\n")
     out = text(await grep(ctx, "needle"))
     assert out.startswith("long.txt:1: needle") and f"truncated to {MAX_LINE_CHARS} chars" in out
 
@@ -103,12 +109,12 @@ async def test_find_limit(ctx: ToolContext) -> None:
         await find(ctx, "*", path="src/a.ts")
 
 
-async def test_ls(ctx: ToolContext) -> None:
+async def test_ls(ctx: ToolContext, ws: Path) -> None:
     out = text(await LsTool().execute(LsParams(), ctx))
     assert out == ".git/\n.gitignore\n.hidden/\nnode_modules/\nNotes.md\noutlink/\nsrc/"
     limited = await LsTool().execute(LsParams(limit=2), ctx)
     assert text(limited) == ".git/\n.gitignore\n\n[2 entries limit reached. Use limit=4 for more]"
-    (ctx.workspace / "empty").mkdir()
+    (ws / "empty").mkdir()
     assert text(await LsTool().execute(LsParams(path="empty"), ctx)) == "(empty directory)"
     with pytest.raises(ToolError, match="outside the workspace"):
         await LsTool().execute(LsParams(path="outlink"), ctx)

@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field
 
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
 from agentspace.tools.output import head_within_cap, with_notices
-from agentspace.tools.paths import resolve_readable
 from agentspace.tools.read import MAX_BYTES
 from agentspace.tools.ripgrep import rg_lines, strip_dot_slash
 
@@ -51,16 +50,16 @@ class FindTool(Tool[FindParams]):
     async def execute(self, args: FindParams, ctx: ToolContext) -> ToolResult:
         """Run `rg --files` filtered by the glob, stopping one past the limit."""
         shown_path = args.path or "."
-        target = resolve_readable(ctx.workspace, ctx.read_roots, shown_path)
-        if not target.exists():
+        kind = await ctx.workspace.stat(shown_path)
+        if kind is None:
             raise ToolError(f"Path not found: {shown_path}")
-        if not target.is_dir():
+        if kind != "dir":
             raise ToolError(f"Not a directory: {shown_path}")
 
         paths: list[str] = []
         limit_reached = False
         flags = ["--files", "--glob", strip_dot_slash(args.pattern)]
-        async with aclosing(rg_lines(flags, ["."], target)) as lines:
+        async with aclosing(rg_lines(ctx.workspace, flags, ["."], shown_path)) as lines:
             async for line in lines:
                 # One more than the limit proves the list was cut; stop rg there.
                 if len(paths) == args.limit:

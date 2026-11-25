@@ -3,13 +3,17 @@
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, ClassVar, Literal, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, Self
 
 from pydantic import BaseModel
 
 from agentspace.ai.messages import TextContent, UserContent
 from agentspace.ai.provider import ToolSpec
+
+# Only for the type checker: the workspace module imports ToolError from here, so a runtime import would cycle.
+# TS: like `import type { Workspace } from ...`.
+if TYPE_CHECKING:
+    from agentspace.workspace import Workspace
 
 # How the calls in one reply run: one after another, or concurrently (after pi's `ToolExecutionMode`).
 # TS: type ExecutionMode = "sequential" | "parallel"
@@ -24,13 +28,11 @@ type OnUpdate = Callable[["ToolResult"], Awaitable[None]]
 # TS: the @dataclass decorator writes the constructor from the fields; frozen=True makes them readonly.
 @dataclass(frozen=True)
 class ToolContext:
-    """What every tool call gets: the session's workspace folder, and a way to report progress."""
+    """What every tool call gets: the session's workspace, and a way to report progress."""
 
-    workspace: Path
-    """The folder the session's tools act in. File tools refuse paths outside it."""
-    read_roots: tuple[Path, ...] = ()
-    """Folders outside the workspace that `read`, `ls`, `grep` and `find` may open but nothing may change:
-    the loaded skills' folders (ADR-016)."""
+    workspace: "Workspace"
+    """Where the session's tools read, write and run commands (ADR-004). It refuses paths outside it,
+    except reads of the loaded skills' folders (ADR-016)."""
     on_update: OnUpdate | None = None
     """Set by the loop for each call. Send a snapshot of the output so far (not a delta); the UI shows the latest.
     Calls after `execute` returns are ignored. Updates are never sent to the model or saved."""

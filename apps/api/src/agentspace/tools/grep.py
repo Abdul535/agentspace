@@ -1,6 +1,7 @@
 """The `grep` tool: search file contents with ripgrep, after pi's `packages/coding-agent/src/core/tools/grep.ts`."""
 
 import json
+import posixpath
 from base64 import b64decode
 from contextlib import aclosing
 from typing import Annotated, Any
@@ -9,7 +10,6 @@ from pydantic import BaseModel, Field
 
 from agentspace.agent.tool import Tool, ToolContext, ToolError, ToolResult
 from agentspace.tools.output import head_within_cap, with_notices
-from agentspace.tools.paths import resolve_readable
 from agentspace.tools.read import MAX_BYTES
 from agentspace.tools.ripgrep import rg_lines, strip_dot_slash
 
@@ -55,11 +55,13 @@ class GrepTool(Tool[GrepParams]):
     async def execute(self, args: GrepParams, ctx: ToolContext) -> ToolResult:
         """Run rg and format its matches as `path:line: text`, context lines as `path-line- text`."""
         shown_path = args.path or "."
-        target = resolve_readable(ctx.workspace, ctx.read_roots, shown_path)
-        if not target.exists():
+        kind = await ctx.workspace.stat(shown_path)
+        if kind is None:
             raise ToolError(f"Path not found: {shown_path}")
         # rg prints paths relative to where it searches: a directory searches from inside it, a file from its folder.
-        cwd, search = (target, ".") if target.is_dir() else (target.parent, target.name)
+        # TS: posixpath.split is path.posix's dirname and basename in one call.
+        folder, name = posixpath.split(shown_path)
+        cwd, search = (shown_path, ".") if kind == "dir" else (folder or ".", name)
 
         flags = ["--json"]
         if args.ignore_case:
@@ -77,7 +79,7 @@ class GrepTool(Tool[GrepParams]):
         last_file, window_end = "", 0  # the last kept match's file and the end of its trailing context
 
         # TS: aclosing is `await using`: when the block exits (even via break), the generator is closed and rg killed.
-        async with aclosing(rg_lines(flags, [args.pattern, search], cwd)) as events:
+        async with aclosing(rg_lines(ctx.workspace, flags, [args.pattern, search], cwd)) as events:
             async for raw in events:
                 event = json.loads(raw)
                 kind = event["type"]
