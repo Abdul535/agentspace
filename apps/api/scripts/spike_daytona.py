@@ -17,7 +17,14 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from daytona import AsyncDaytona, AsyncSandbox, CreateSandboxFromSnapshotParams, DaytonaConfig, ListSandboxesQuery
+from daytona import (
+    AsyncDaytona,
+    AsyncSandbox,
+    CreateSandboxFromSnapshotParams,
+    DaytonaConfig,
+    ListSandboxesQuery,
+    SessionExecuteRequest,
+)
 
 LABEL = {"agentspace-spike": "1"}
 results: list[tuple[str, str]] = []
@@ -73,10 +80,56 @@ async def spike(daytona: AsyncDaytona, sandbox: AsyncSandbox) -> None:
     _, alive = await sh(sandbox, "kill -0 $(cat /tmp/fg.pid) 2>/dev/null && echo ALIVE || echo DEAD")
     record("Q2 timed-out command afterwards", alive.strip())
 
-    # Q2: background children: does exec return at once, and do they outlive it?
-    (code, out), took = await timed(lambda: sh(sandbox, "(sleep 300; echo late) & echo $! > /tmp/bg.pid; echo done"))
+    # Q2: background children. A first run hung here for 25 min: a child that keeps
+    # the output pipe open stops exec from returning, so this case gets a timeout.
+    try:
+        (code, out), took = await timed(
+            lambda: sh(sandbox, "(sleep 300; echo late) & echo $! > /tmp/bg.pid; echo done", timeout=10)
+        )
+        record("Q2 background child holding output", f"exec returned in {took:.1f}s ({out.strip()!r})")
+    except Exception as exc:  # the spike wants to see whichever error the SDK raises
+        record("Q2 background child holding output", f"exec did not return in 10s: {type(exc).__name__}")
     _, alive = await sh(sandbox, "kill -0 $(cat /tmp/bg.pid) 2>/dev/null && echo ALIVE || echo DEAD")
-    record("Q2 background child", f"exec returned in {took:.1f}s ({out.strip()!r}); child afterwards: {alive.strip()}")
+    record("Q2 that child after exec's timeout", alive.strip())
+    (code, out), took = await timed(
+        lambda: sh(sandbox, "nohup sleep 300 >/dev/null 2>&1 & echo $! > /tmp/bg2.pid; echo done", timeout=10)
+    )
+    _, alive = await sh(sandbox, "kill -0 $(cat /tmp/bg2.pid) 2>/dev/null && echo ALIVE || echo DEAD")
+    record("Q2 background child with output redirected", f"exec returned in {took:.1f}s; child: {alive.strip()}")
+
+    # Q2b: streaming output (bash's live updates, ripgrep stopping early) via a session.
+    await sandbox.process.create_session("spike")
+    started = time.monotonic()
+    first: list[float] = []
+    chunks: list[str] = []
+
+    def on_chunk(chunk: str) -> None:
+        """Note when the first output arrives, and keep every chunk."""
+        if chunk and not first:
+            first.append(time.monotonic() - started)
+        chunks.append(chunk)
+
+    # A session is one long-lived shell, so a bare `exit` would end the shell, not the
+    # command: run it in its own `sh -c`.
+    response = await sandbox.process.execute_session_command(
+        "spike", SessionExecuteRequest(command="sh -c 'echo one; sleep 3; echo two; exit 4'", run_async=True)
+    )
+    try:
+        await asyncio.wait_for(
+            sandbox.process.get_session_command_logs_async("spike", response.cmd_id, on_chunk, on_chunk),
+            timeout=30,
+        )
+        ended = "log stream closed"
+    except TimeoutError:
+        ended = "log stream still open after 30s"
+    total = time.monotonic() - started
+    command = await sandbox.process.get_session_command("spike", response.cmd_id)
+    record(
+        "Q2b streamed output",
+        f"first chunk after {first[0] if first else -1:.1f}s, {ended} at {total:.1f}s, "
+        f"exit={command.exit_code}, chunks={chunks!r}",
+    )
+    await sandbox.process.delete_session("spike")
 
     # Q3: bytes in and out, parent folders, listing, info.
     payload = bytes(range(256)) * 4
@@ -112,6 +165,16 @@ async def spike(daytona: AsyncDaytona, sandbox: AsyncSandbox) -> None:
     found = [s.id async for s in daytona.list(ListSandboxesQuery(labels=LABEL))]
     record("Q6 found by label", f"{sandbox.id in found} ({len(found)} sandbox(es) with the label)")
 
+    # Q6b: a name we choose (the session id) as the key: get by name, and a second create.
+    again = await daytona.get(sandbox.name)
+    record("Q6b get by name", f"same sandbox: {again.id == sandbox.id}")
+    try:
+        dup = await daytona.create(CreateSandboxFromSnapshotParams(name=sandbox.name, labels=LABEL))
+        record("Q6b create with a taken name", f"created a second sandbox {dup.id} (not idempotent)")
+        await daytona.delete(dup)
+    except Exception as exc:  # the spike wants to see whichever error the SDK raises
+        record("Q6b create with a taken name", f"refused: {type(exc).__name__}: {str(exc)[:120]}")
+
     # Q1: files survive stop -> start; how long each takes.
     await sh(sandbox, "echo kept > persist.txt")
     _, stop_s = await timed(lambda: daytona.stop(sandbox))
@@ -120,16 +183,28 @@ async def spike(daytona: AsyncDaytona, sandbox: AsyncSandbox) -> None:
     record("Q1 stop / start time", f"stop {stop_s:.1f}s, start {start_s:.1f}s")
     record("Q1 file after stop/start", out.strip())
 
+    # Q1b: archive (cheap storage after long idle) -> start: how long, and are files kept?
+    await daytona.stop(sandbox)
+    _, archive_s = await timed(lambda: sandbox.archive())
+    _, start_s = await timed(lambda: daytona.start(sandbox, timeout=600))
+    _, out = await sh(sandbox, "cat persist.txt 2>&1")
+    record(
+        "Q1b archive / start time", f"archive {archive_s:.1f}s, start from archive {start_s:.1f}s; file: {out.strip()}"
+    )
+
 
 async def main() -> None:
     """Create the sandbox, run the checks, always delete it, then print the report."""
     # TS: `async with` closes the client at the end, like `await using`.
     async with AsyncDaytona(DaytonaConfig(api_key=load_key())) as daytona:
-        params = CreateSandboxFromSnapshotParams(labels=LABEL, auto_stop_interval=15, network_block_all=True)
+        # A name we pick, the way a session id would be used.
+        name = f"agentspace-spike-{int(time.time())}"
+        params = CreateSandboxFromSnapshotParams(name=name, labels=LABEL, auto_stop_interval=15, network_block_all=True)
         sandbox, create_s = await timed(lambda: daytona.create(params))
         record("create time", f"{create_s:.1f}s (id {sandbox.id})")
         try:
-            await spike(daytona, sandbox)
+            # A hard ceiling, so a hanging call can't keep a billed sandbox running.
+            await asyncio.wait_for(spike(daytona, sandbox), timeout=900)
         finally:
             await daytona.delete(sandbox)
             print("sandbox deleted", flush=True)
