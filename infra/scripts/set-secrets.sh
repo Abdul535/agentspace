@@ -24,6 +24,7 @@ prefix_of() {
     AGENTSPACE_REDIS_URL) echo "rediss://" ;;
     LANGFUSE_PUBLIC_KEY) echo "pk-lf-" ;;
     LANGFUSE_SECRET_KEY) echo "sk-lf-" ;;
+    DAYTONA_API_KEY) echo "dtn_" ;;
   esac
 }
 
@@ -35,7 +36,7 @@ if [[ $# -gt 0 ]]; then
   exit 0
 fi
 
-for name in AGENTSPACE_DATABASE_URL AGENTSPACE_REDIS_URL LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY; do
+for name in AGENTSPACE_DATABASE_URL AGENTSPACE_REDIS_URL LANGFUSE_PUBLIC_KEY LANGFUSE_SECRET_KEY DAYTONA_API_KEY; do
   if ! aws secretsmanager describe-secret --secret-id "$SECRET_PREFIX$name" >/dev/null 2>&1; then
     echo "skipped: $SECRET_PREFIX$name (Terraform didn't make it)"
   elif has_value "$name"; then

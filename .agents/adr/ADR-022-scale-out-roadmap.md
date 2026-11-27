@@ -111,7 +111,7 @@ per session, and workspace files survive deploys.
 59. [x] **Workspace protocol, local only** (ADR-004, built; interface in ADR-034). Tools go through
     `Workspace` with `LocalWorkspace` as the only backend. No change users can
     see; the tests prove it.
-28. [ ] **Sandbox per session (ADR)** (ADR-014; design in ADR-035, spike answered in ADR-004). `SandboxWorkspace` on Daytona
+28. [x] **Sandbox per session (ADR)** (ADR-014; built, ADR-035; spike answered in ADR-004). `SandboxWorkspace` on Daytona
     (answer the questions in `scripts/spike_daytona.py` first, E2B if it fails).
     Workspace files live in the sandbox, not on our tasks. `bash` is allowed
     only on sandboxed sessions. Network limits and a per-user sandbox cap

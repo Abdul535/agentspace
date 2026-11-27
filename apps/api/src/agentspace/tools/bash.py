@@ -15,7 +15,7 @@ from typing import Annotated, Any
 from asyncer import asyncify
 from pydantic import BaseModel, Field
 
-from agentspace.agent.tool import OnUpdate, Tool, ToolContext, ToolResult
+from agentspace.agent.tool import OnUpdate, Tool, ToolContext, ToolError, ToolResult
 from agentspace.ai.messages import TextContent
 from agentspace.tools.read import MAX_BYTES, MAX_LINES
 
@@ -25,6 +25,10 @@ CHUNK_BYTES = 64 * 1024
 # Live output for the UI while a command runs: checked this often, at most this much from the end.
 UPDATE_INTERVAL_SECONDS = 0.1
 UPDATE_TAIL_BYTES = 8 * 1024
+# Where a cut-off command's full output is saved, in the workspace, so the model can `read` it (ADR-035).
+FULL_OUTPUT_DIR = ".agentspace/bash"
+# The most of one command's output kept there: its end, like the shown text.
+MAX_SAVED_BYTES = 10 * 1024 * 1024
 
 
 class BashParams(BaseModel):
@@ -44,7 +48,8 @@ class BashTool(Tool[BashParams]):
     description = (
         "Execute a bash command in the workspace folder. Returns stdout and stderr. Output is truncated to the "
         f"last {MAX_LINES} lines or {MAX_BYTES // 1024}KB, whichever is hit first; if truncated, the full output is "
-        "saved to a temp file. Background processes the command starts are killed when it exits. "
+        f"saved to a file in {FULL_OUTPUT_DIR}/ in the workspace. "
+        "Background processes the command starts are killed when it exits. "
         "Optionally provide a timeout in seconds."
     )
     params = BashParams
@@ -70,11 +75,17 @@ class BashTool(Tool[BashParams]):
                 with contextlib.suppress(asyncio.CancelledError):
                     await watcher
 
+        saved_as = f"{FULL_OUTPUT_DIR}/{log.name}"
         # TS: render_output reads a possibly large file (blocking); asyncify runs it on a worker thread.
-        text, details = await asyncify(render_output)(log)
+        text, details = await asyncify(render_output)(log, saved_as)
+        if details["truncated"]:
+            text = await save_full_output(ctx, log, saved_as, text)
         # TS: `|=` merges into the dict in place, like Object.assign(details, {...}).
         details |= {"exit_code": exit_code, "wall_time_seconds": round(time.monotonic() - started, 1)}
         if exit_code is None:
+            if args.timeout is None:
+                # The workspace's own limit (a sandbox has one, ADR-035); the model can ask for more time.
+                return error(text, "Command timed out at the workspace's time limit. Pass a longer `timeout`.", details)
             return error(text, f"Command timed out after {args.timeout:g} seconds", details)
         if exit_code != 0:
             return error(text, f"Command exited with code {exit_code}", details)
@@ -116,10 +127,31 @@ def new_log_file() -> Path:
     return Path(name)
 
 
-def render_output(log: Path) -> tuple[str, dict[str, Any]]:
+async def save_full_output(ctx: ToolContext, log: Path, saved_as: str, text: str) -> str:
+    """Copy the local log into the workspace at `saved_as` and delete it; `text` gets a note if that failed."""
+    try:
+        data = await asyncify(read_end)(log, MAX_SAVED_BYTES)
+        await ctx.workspace.update_file(saved_as, lambda _old: (data, None))
+    except ToolError as exc:
+        return f"{text}\n[The full output could not be saved: {exc}]"
+    finally:
+        log.unlink(missing_ok=True)
+    return text
+
+
+def read_end(log: Path, max_bytes: int) -> bytes:
+    """The last `max_bytes` of the file (all of it when smaller)."""
+    with log.open("rb") as f:
+        size = f.seek(0, os.SEEK_END)
+        f.seek(max(0, size - max_bytes))
+        return f.read()
+
+
+def render_output(log: Path, saved_as: str) -> tuple[str, dict[str, Any]]:
     """The text the model sees (the end of the output, cut at the caps) and the details for the UI.
 
-    Deletes `log` when nothing was cut, since the text already has everything.
+    When something was cut, the note points at `saved_as`, where the caller saves the full output;
+    otherwise `log` is deleted, since the text already has everything.
     """
     size = log.stat().st_size
     newlines = 0
@@ -157,7 +189,7 @@ def render_output(log: Path) -> tuple[str, dict[str, Any]]:
         return "\n".join(shown), {"truncated": False}
 
     if partial_line:
-        note = f"[Showing the last {MAX_BYTES // 1024}KB of line {total_lines}. Full output: {log}]"
+        note = f"[Showing the last {MAX_BYTES // 1024}KB of line {total_lines}. Full output: {saved_as}]"
     else:
-        note = f"[Showing lines {total_lines - len(shown) + 1}-{total_lines} of {total_lines}. Full output: {log}]"
-    return "\n".join(shown) + f"\n\n{note}", {"truncated": True, "full_output_path": str(log)}
+        note = f"[Showing lines {total_lines - len(shown) + 1}-{total_lines} of {total_lines}. Full output: {saved_as}]"
+    return "\n".join(shown) + f"\n\n{note}", {"truncated": True, "full_output_path": saved_as}

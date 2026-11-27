@@ -16,7 +16,7 @@ from pathlib import Path
 from asyncer import asyncify
 
 from agentspace.agent.compaction import build_context, can_compact, compact, context_tokens
-from agentspace.agent.events import AgentEndEvent, AgentStartEvent, CompactionReason
+from agentspace.agent.events import AgentEndEvent, AgentStartEvent, CompactionReason, WorkspaceStatusEvent
 from agentspace.agent.hooks import LoopConfig
 from agentspace.agent.loop import Emit, run_loop
 from agentspace.agent.messages import AgentMessage, convert_to_llm
@@ -32,7 +32,18 @@ from agentspace.mcp.manager import McpManager, ServerConfig
 from agentspace.runs import ActiveRun, LoopFn
 from agentspace.session.models import SessionRow
 from agentspace.tools import allows_mcp, build_tools
+from agentspace.workspace import Workspace
 from agentspace.workspace.local import LocalWorkspace
+from agentspace.workspace.sandbox import SandboxWorkspace
+from agentspace.workspace.sandboxes import (
+    Sandboxes,
+    WorkspaceStatus,
+    sandbox_name,
+    sandbox_skill,
+    session_box,
+    skills_folder,
+    workspace_folder,
+)
 
 
 # TS: `frozen=True` makes instances read-only, like `Readonly<{...}>` enforced at runtime.
@@ -93,11 +104,13 @@ def run_recipe(
     lookup_model: ModelLookup | None = None,
     mcp: McpManager | None = None,
     mcp_servers: Sequence[ServerConfig] = (),
+    sandboxes: Sandboxes | None = None,
 ) -> LoopFn:
     """The loop function for this kind of run, for the run manager to drive with its own `emit`.
 
     A prompt or continue run looks its model up with `lookup_model` (none: treated as unknown) and gets the
     tools of `mcp_servers` from `mcp`; a compact run uses neither, so its route needn't provide them.
+    With the `daytona` backend its tools work in the session's sandbox from `sandboxes` (ADR-035).
     """
     session = run.session
     active = run.active
@@ -132,7 +145,36 @@ def run_recipe(
         """The model's catalog entry, or None when there's no catalog or it doesn't know the model."""
         return await lookup_model() if lookup_model else None
 
-    async def agent(emit: Emit, message: UserMessage | None, tools: list[Tool], skills: list[Skill]) -> None:
+    def workspace_for(emit: Emit, skills: list[Skill]) -> tuple[Workspace, list[Skill]]:
+        """This run's workspace, and the skills as its tools reach them (copied into a sandbox, or in place)."""
+        if settings.workspace_backend == "local":
+            return LocalWorkspace(run.workspace, read_roots=[skill.base_dir for skill in skills]), skills
+        if sandboxes is None:
+            raise RuntimeError("The daytona workspace backend needs `sandboxes`.")
+
+        async def on_status(status: WorkspaceStatus, error: str | None) -> None:
+            """Tell the UI the sandbox is starting, ready or failed, so a wait is never blank."""
+            await emit(WorkspaceStatusEvent(status=status, error=error))
+
+        open_box = session_box(
+            sandboxes,
+            name=sandbox_name(settings.sandbox_prefix, session.id),
+            labels={"agentspace.session": session.id, "agentspace.prefix": settings.sandbox_prefix},
+            skills=skills,
+            on_status=on_status,
+        )
+        # Opened on the first tool call, not here: a run that only chats never wakes or pays for a sandbox.
+        workspace = SandboxWorkspace(
+            open_box,
+            root=workspace_folder(sandboxes.home),
+            read_roots=[skills_folder(sandboxes.home)],
+            default_timeout=settings.sandbox_exec_timeout_seconds,
+        )
+        return workspace, [sandbox_skill(skill, skills_folder(sandboxes.home)) for skill in skills]
+
+    async def agent(
+        emit: Emit, message: UserMessage | None, tools: list[Tool], skills: list[Skill], workspace: Workspace
+    ) -> None:
         """One pass of the agent loop over the transcript so far, with `message` added first if given."""
         info = await find_model()
         # Built per pass, after MCP joined, so the prompt lists exactly the tools the model gets.
@@ -154,7 +196,7 @@ def run_recipe(
             # A copy: the run appends to its own list as messages finish.
             history=build_context(active.messages),
             prompt=message,
-            ctx=ToolContext(workspace=LocalWorkspace(run.workspace, read_roots=[skill.base_dir for skill in skills])),
+            ctx=ToolContext(workspace=workspace),
             max_turns=settings.max_turns,
             max_tokens=settings.max_output_tokens,
             thinking_level=session.thinking_level,
@@ -182,22 +224,26 @@ def run_recipe(
     async def prompt_or_continue(emit: Emit) -> None:
         """This run: workspace, tools and skills, the agent loop, then compaction if the context needs it (ADR-009)."""
         run.workspace.mkdir(parents=True, exist_ok=True)
-        tools: list[Tool] = build_tools(session.tools, bash=settings.enable_bash)
+        # In a sandbox, bash can't reach our server or its secrets, so it's always allowed there (ADR-035).
+        bash = settings.enable_bash or settings.workspace_backend != "local"
+        tools: list[Tool] = build_tools(session.tools, bash=bash)
         # Rescanned every run, so an added or edited skill shows without a restart (ADR-016).
         # TS: asyncify runs the blocking folder scan on a worker thread and gives back a promise of its result.
-        skills, _ = await asyncify(load_skills)(settings.resolved_skills_dir)
+        found_skills, _ = await asyncify(load_skills)(settings.resolved_skills_dir)
+        # One workspace for the whole run, so a retry after compaction reuses the sandbox it opened.
+        workspace, skills = workspace_for(emit, found_skills)
         # Inside the run, so the stream is already open while slow servers are waited for.
         # Never for a read-only session: an MCP tool can do anything its server does, writes included.
         if mcp and mcp_servers and allows_mcp(session.tools):
             tools.extend(await mcp.tools_for(session.id, run.workspace, list(mcp_servers)))
-        await agent(emit, prompt, tools, skills)
+        await agent(emit, prompt, tools, skills, workspace)
         if not settings.compaction_enabled:
             return
         last = active.messages[-1] if active.messages else None
         if isinstance(last, AssistantMessage) and is_context_overflow(last):
             # Once only: if the retry overflows too, compacting again won't make room, so the error stands.
             if await compact_now(emit, "overflow"):
-                await agent(emit, None, tools, skills)
+                await agent(emit, None, tools, skills, workspace)
             return
         if await over_threshold():
             await compact_now(emit, "threshold")

@@ -95,6 +95,9 @@ in the AWS console: the next `apply` puts them back.
 - **A new setting or secret** for the API: edit `ecs.tf` (and `secrets.tf`), apply, run `set-secrets.sh` if you
   added a secret, then deploy. The new task definition only goes live on the next deploy.
 - **Tracing:** `terraform apply -var langfuse_enabled=true`, then run `set-secrets.sh` and deploy.
+- **A sandbox per session** (ADR-035): `terraform apply -var sandboxes_enabled=true`, then run `set-secrets.sh`
+  (it asks for the Daytona API key, from the Daytona dashboard's Keys page) and deploy. Files then live in each
+  session's sandbox and survive deploys, and `bash` is on for every user.
 
 ## After the first deploy
 

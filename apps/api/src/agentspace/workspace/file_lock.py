@@ -7,7 +7,7 @@ order and the lookup below never awaits, so pi's extra registration queue isn't 
 
 import asyncio
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -20,15 +20,19 @@ class _Entry:
     users: int = 0
 
 
-# Keyed by the fully resolved path, so a symlink and its target share one lock.
-_entries: dict[Path, _Entry] = {}
+# Keyed by a string naming one file: the resolved host path, or a sandbox id plus its path.
+_entries: dict[str, _Entry] = {}
 
 
 # TS: an async context manager; `async with file_lock(p):` is like `await using _ = await fileLock(p)`.
+def file_lock(path: Path) -> AbstractAsyncContextManager[None]:
+    """Hold a host file's lock; a symlink and its target share one lock."""
+    return key_lock(str(path.resolve()))  # resolve follows symlinks, and works for files that don't exist yet
+
+
 @asynccontextmanager
-async def file_lock(path: Path) -> AsyncGenerator[None]:
-    """Hold `path`'s lock for the body of the `async with`; other calls on the same file wait their turn."""
-    key = path.resolve()  # follows symlinks, and works for files that don't exist yet
+async def key_lock(key: str) -> AsyncGenerator[None]:
+    """Hold the lock named `key` for the body of the `async with`; other calls with the same key wait their turn."""
     entry = _entries.setdefault(key, _Entry())  # TS: map.get(key) ?? map.set(key, new Entry()).get(key)
     entry.users += 1
     try:

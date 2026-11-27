@@ -1,5 +1,6 @@
 import asyncio
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -84,16 +85,19 @@ async def test_cancelling_the_run_kills_the_command(ctx: ToolContext, ws: Path) 
     assert_dead(int(pid_file.read_text()))
 
 
-async def test_long_output_keeps_the_tail_and_saves_the_rest(ctx: ToolContext) -> None:
+async def test_long_output_keeps_the_tail_and_saves_the_rest_in_the_workspace(ctx: ToolContext) -> None:
     total = MAX_LINES + 500
     result = await bash(ctx, f"seq 1 {total}")
     out = text(result)
     assert out.startswith("501\n")
     assert f"[Showing lines 501-{total} of {total}. Full output: " in out
     assert result.details is not None and result.details["truncated"]
-    full = Path(result.details["full_output_path"])
-    assert full.read_text().splitlines()[0] == "1"
-    full.unlink()
+    # Inside the workspace, so the model can `read` it; the server's temp copy is gone.
+    saved = result.details["full_output_path"]
+    assert saved.startswith(".agentspace/bash/")
+    assert f"Full output: {saved}]" in out
+    assert (await ctx.workspace.read_bytes(saved)).decode().splitlines()[0] == "1"
+    assert not list(Path(tempfile.gettempdir()).glob(Path(saved).name))
 
 
 async def test_one_huge_line_shows_its_end(ctx: ToolContext) -> None:
@@ -102,7 +106,7 @@ async def test_one_huge_line_shows_its_end(ctx: ToolContext) -> None:
     assert out.split("\n\n")[0].endswith("xEND")
     assert f"[Showing the last {MAX_BYTES // 1024}KB of line 1." in out
     assert result.details is not None
-    Path(result.details["full_output_path"]).unlink()
+    assert (await ctx.workspace.read_bytes(result.details["full_output_path"])).endswith(b"xEND\n")
 
 
 def assert_dead(pid: int) -> None:

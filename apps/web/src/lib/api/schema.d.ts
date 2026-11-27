@@ -467,7 +467,7 @@ export interface components {
             /** New Messages */
             new_messages: components["schemas"]["AgentMessage"][];
         };
-        AgentEvent: components["schemas"]["AgentStartEvent"] | components["schemas"]["TurnStartEvent"] | components["schemas"]["MessageStartEvent"] | components["schemas"]["MessageUpdateEvent"] | components["schemas"]["MessageEndEvent"] | components["schemas"]["ToolExecutionStartEvent"] | components["schemas"]["ToolExecutionUpdateEvent"] | components["schemas"]["ToolExecutionEndEvent"] | components["schemas"]["TurnEndEvent"] | components["schemas"]["AgentEndEvent"] | components["schemas"]["CompactionStartEvent"] | components["schemas"]["CompactionEndEvent"];
+        AgentEvent: components["schemas"]["AgentStartEvent"] | components["schemas"]["TurnStartEvent"] | components["schemas"]["MessageStartEvent"] | components["schemas"]["MessageUpdateEvent"] | components["schemas"]["MessageEndEvent"] | components["schemas"]["ToolExecutionStartEvent"] | components["schemas"]["ToolExecutionUpdateEvent"] | components["schemas"]["ToolExecutionEndEvent"] | components["schemas"]["TurnEndEvent"] | components["schemas"]["AgentEndEvent"] | components["schemas"]["CompactionStartEvent"] | components["schemas"]["CompactionEndEvent"] | components["schemas"]["WorkspaceStatusEvent"];
         AgentMessage: components["schemas"]["UserMessage"] | components["schemas"]["AssistantMessage"] | components["schemas"]["ToolResultMessage"] | components["schemas"]["NoticeMessage"] | components["schemas"]["CompactionSummaryMessage"];
         /**
          * AgentStartEvent
@@ -1358,6 +1358,26 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * WorkspaceStatusEvent
+         * @description The session's sandbox had to be created or woken (ADR-035): `starting`, then `ready` or `failed`.
+         *
+         *     Never sent when the sandbox was already running, or for the local backend.
+         */
+        WorkspaceStatusEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "workspace_status";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "starting" | "ready" | "failed";
+            /** Error */
+            error?: string | null;
         };
     };
     responses: never;

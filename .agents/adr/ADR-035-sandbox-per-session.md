@@ -1,6 +1,6 @@
 # ADR-035 — A Daytona sandbox per session (`SandboxWorkspace`)
 
-- **Status:** Proposed
+- **Status:** Accepted (built 2026-11-28)
 - **Date:** 2026-11-27
 - **Deciders:** project owner
 
@@ -59,13 +59,21 @@ workspace" state.
   uses a workspace tool. A session that only chats never gets a sandbox.
 - **Idle stop is Daytona's:** `auto_stop_interval=15` (minutes) and
   `auto_archive_interval` = 1 day. Because only API calls count as activity, a
-  long `exec` calls `refresh_activity` every few minutes so the sandbox isn't
-  stopped under it. We run no reaper of our own: unlike CompanyOS, there's no
-  daemon in the box to keep alive between turns.
+  command still running after 5 minutes calls `refresh_activity` (and again
+  every 5 minutes), so the sandbox isn't stopped under it. We run no reaper of
+  our own: unlike CompanyOS, there's no daemon in the box to keep alive between
+  turns.
 - **No automatic delete.** Sessions are archived, not deleted, today. Deleting a
   sandbox comes with deleting a session, when that exists.
 
 ### `SandboxWorkspace` (`workspace/sandbox.py`), the same six methods
+It sits on a small `Box` port (`kind`, `download`, `upload`, `entries`, `run`).
+`DaytonaBox` (`workspace/daytona.py`) fills it for Daytona, and `HostBox`
+(`tests/host_box.py`) fills it with this machine for tests. The vendor
+behind `ensure` is the `Sandboxes` port (`find`, `create`, `start`, `home`).
+The workspace folder is `<home>/workspace`, and skills go in
+`<home>/.agentspace/skills`.
+
 - **Paths** resolve lexically against the sandbox's workspace folder
   (`/home/daytona/workspace`). There is no symlink check: the sandbox is the
   security boundary, so a link pointing outside it reaches only that session's
@@ -75,14 +83,25 @@ workspace" state.
 - **`update_file`** downloads the file, applies `change`, and uploads the result,
   under the same in-process per-file lock (ADR-034). That is enough while one
   server owns a session's run (ADR-029).
-- **`exec`** runs as a session command (`sh -c …` in its own process group,
-  `run_async=True`), streams the log into the local `output` file, and polls for
-  the exit code.
+- **`exec`** runs as a Daytona session command (`run_async=True`) under
+  `setsid`, so it has its own process group, and streams the log into the
+  local `output` file. It starts with `exec 2>&1`: Daytona keeps stdout and
+  stderr on separate pipes, which can reorder them.
+  - **The exit code comes in the stream.** Daytona reports no exit code while
+    a background child still holds the output open. That was found in
+    building, beyond the spike. So the command's `EXIT` trap prints
+    `<nonce>:<code>` on stdout, after everything the command wrote, then kills
+    its own process group. `ExitMarker` takes that line out of the output.
+    One command costs three calls: create session, execute, stream. The
+    session is deleted in the background. Each call took 0.3–1 s from a
+    laptop, so a command took about 2–3 s. This is to be measured again from
+    AWS.
   - **Every command gets a timeout,** even when the model gives none: the
-    model's own, or `AGENTSPACE_SANDBOX_EXEC_TIMEOUT` (default 10 minutes). A
-    child holding the output open would otherwise hang the run (spike Q2).
-  - On timeout or cancel, we kill the process group and delete the command's
-    Daytona session.
+    model's own, or `AGENTSPACE_SANDBOX_EXEC_TIMEOUT_SECONDS` (default 10
+    minutes). `bash` then says the workspace's limit was hit and suggests a
+    longer `timeout`.
+  - On timeout or cancel, before the trap has run, the process group is
+    killed through a pid file the command wrote.
 - **`ripgrep`** runs `rg` the same way and yields lines as they stream. Stopping
   early kills it.
 - **`bash`'s full-output file** is also written to
@@ -97,26 +116,43 @@ the folder matches what is already there. The system prompt lists those paths.
 choice).
 
 ### Network (owner's choice: package sites only)
-Sandboxes are created with a `domain_allow_list`: PyPI, npm, GitHub and their
-CDNs, held in one setting (`AGENTSPACE_SANDBOX_ALLOWED_DOMAINS`). Everything
-else is blocked. The list is applied on create, and `update_network_settings`
-brings older sandboxes up to date on `ensure`.
+Daytona's network policy depends on the account tier
+([network limits](https://www.daytona.io/docs/en/network-limits/)). Tiers 1–2
+allow only "essential services": package registries, git hosts and model
+providers. They refuse any per-sandbox override, and a create with a
+`domain_allow_list` fails. Tiers 3–4 allow the whole internet and accept an
+allow list. So the setting is a mode, `AGENTSPACE_SANDBOX_NETWORK`:
+
+- **`vendor_default`** (the default): Daytona's tier policy. On our account
+  (Tier 1–2), PyPI answers and `example.com` is blocked, which is the
+  owner's choice already.
+- **`allow_list`**: only `AGENTSPACE_SANDBOX_ALLOWED_DOMAINS` (PyPI, npm,
+  GitHub). This is for Tier 3+, where it must also list every registry, since
+  essential services aren't added for you. Applied on create, and re-applied
+  when a sandbox is woken.
+- **`blocked`**: no network.
+
+Moving to Tier 3+ means switching production to `allow_list`, or sandboxes
+get the whole internet.
 
 ### What the user sees
 `ensure` emits a new `workspace_status` event: `starting` when it has to create
 or start a sandbox, `ready` when done, `failed` with the reason. The web app
-shows a designed state above the composer for `starting`, worded like:
+shows a status line above the composer for `starting`:
 
-> "Starting this session's computer… Your message is queued and goes out on its
-> own."
+> "Starting this session's computer… Its tools wait for it, usually a few
+> seconds. Files you made before are kept."
 
-`failed` becomes an error with a retry. A quick `get` of a running sandbox
-emits nothing, so nothing flickers.
+On `failed`, the tool call returns the reason to the model, which replies. The
+web app keeps the reason ("This session's computer couldn't start: …") in the
+error alert after the run. The next tool call tries again. A `get` that finds
+the sandbox running emits nothing, so nothing flickers.
 
 ### Settings and limits
-- `AGENTSPACE_WORKSPACE_BACKEND=local|daytona`, looked up through a small
-  registry the way `ai/providers` is. `DAYTONA_API_KEY` is a secret (Secrets
-  Manager, through Terraform).
+- `AGENTSPACE_WORKSPACE_BACKEND=local|daytona`. Startup fails if `daytona` has
+  no `DAYTONA_API_KEY`. In production, `terraform apply -var
+  sandboxes_enabled=true` makes the key's secret box and sets the backend,
+  with sandbox prefix `agentspace-prod`. `set-secrets.sh` asks for the key.
 - **`bash` is allowed on every sandboxed session.** On `local` it stays behind
   `AGENTSPACE_ENABLE_BASH`.
 - **Per-user cap:** a sandbox runs only during a run and for 15 minutes after.
@@ -147,11 +183,17 @@ emits nothing, so nothing flickers.
   tool calls (ADR-003 step 9) matter more.
 - Daytona becomes a dependency and a per-second cost. If Daytona is down,
   sandboxed sessions can't use tools, and the run says so.
-- Tests: `tests/test_workspace.py` runs against both backends. The Daytona runs
-  are marked and run only when `DAYTONA_API_KEY` is set. The lifecycle
-  (`ensure`, conflict retry, start when stopped) is tested with a fake Daytona
-  client.
+- Tests: `tests/test_workspace.py` runs every protocol test on the local
+  backend, on `SandboxWorkspace` over `HostBox`, and on a real Daytona sandbox
+  when `DAYTONA_API_KEY` is set (all 17 pass there). `tests/test_sandboxes.py`
+  covers the lifecycle with a fake vendor: create once, wake, adopt a taken
+  name, two prompts at once, failure and retry, skill copies.
+  `tests/test_daytona.py` covers the exit marker offline, plus one real
+  create, find, refuse, stop and wake cycle with the network check.
 - Not moved: MCP still starts on our server (step 60), and existing local
   workspace files are not migrated (they are lost on deploy anyway).
-- Open: the real time to start from archive, and whether deleting a Daytona
-  session kills the commands started in it. The implementation checks both.
+- Open: the real time to start from archive. Deleting a Daytona session is no
+  longer relied on to kill anything: the trap or the pid-file kill does.
+- Not done here: a reconnecting browser misses a `starting` sent before it
+  reconnected, since `run_snapshot` doesn't carry it. The tool call still shows
+  as running.

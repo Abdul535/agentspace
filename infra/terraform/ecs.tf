@@ -87,11 +87,18 @@ resource "aws_ecs_task_definition" "api" {
     portMappings = [{ containerPort = 8000, protocol = "tcp" }]
     # SIGKILL comes 120 s after SIGTERM: 100 s of grace for runs, then 15 s for the last saves (ADR-030 §3).
     stopTimeout = 120
-    environment = [
-      { name = "AGENTSPACE_SUPABASE_URL", value = var.supabase_url },
-      { name = "AGENTSPACE_AUTO_MIGRATE", value = "false" },
-      { name = "AGENTSPACE_SHUTDOWN_GRACE_SECONDS", value = "100" },
-    ]
+    environment = concat(
+      [
+        { name = "AGENTSPACE_SUPABASE_URL", value = var.supabase_url },
+        { name = "AGENTSPACE_AUTO_MIGRATE", value = "false" },
+        { name = "AGENTSPACE_SHUTDOWN_GRACE_SECONDS", value = "100" },
+      ],
+      # Each session's files and commands in its own Daytona sandbox, named apart from dev ones (ADR-035).
+      var.sandboxes_enabled ? [
+        { name = "AGENTSPACE_WORKSPACE_BACKEND", value = "daytona" },
+        { name = "AGENTSPACE_SANDBOX_PREFIX", value = "agentspace-prod" },
+      ] : [],
+    )
     secrets = [for name, arn in local.secret_arns : { name = name, valueFrom = arn }]
     logConfiguration = {
       logDriver = "awslogs"
