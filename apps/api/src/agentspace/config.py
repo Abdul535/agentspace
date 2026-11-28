@@ -2,8 +2,9 @@
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from agentspace.tools import ToolSetName
@@ -60,7 +61,35 @@ class Settings(BaseSettings):
     default_tool_set: ToolSetName = "all"
     """Tool preset for sessions created without one: `all`, `coding` or `read_only`."""
     enable_bash: bool = False
-    """Give sessions the `bash` tool. Off by default: commands run unsandboxed as the API's user (ADR-003)."""
+    """Give sessions the `bash` tool with the local backend. Off by default: commands run unsandboxed as the API's
+    user (ADR-003). Sandboxed sessions always have it (ADR-035)."""
+
+    workspace_backend: Literal["local", "daytona"] = "local"
+    """Where sessions' files and commands live: a folder on this server, or a Daytona sandbox per session (ADR-035)."""
+    daytona_api_key: str | None = Field(default=None, validation_alias="DAYTONA_API_KEY")
+    """Required by the `daytona` backend; from the Daytona dashboard (Keys)."""
+    sandbox_prefix: str = "agentspace"
+    """Starts every sandbox's name (`<prefix>-<session id>`), so dev and production sandboxes are told apart."""
+    sandbox_exec_timeout_seconds: float = Field(default=600, gt=0)
+    """The longest a sandboxed command may run when the model gives no timeout."""
+    sandbox_auto_stop_minutes: int = Field(default=15, ge=1)
+    """Daytona stops a sandbox after this long without API calls; its files are kept."""
+    sandbox_auto_archive_minutes: int = Field(default=1440, ge=1)
+    """Daytona moves a stopped sandbox to cheaper storage after this long; it wakes a little slower."""
+    sandbox_network: Literal["vendor_default", "allow_list", "blocked"] = "vendor_default"
+    """A sandbox's outbound network (ADR-035). `vendor_default`: Daytona's own policy, which on its Tiers 1–2 is
+    package registries, git hosts and model providers only (and can't be changed). `allow_list`: only
+    `sandbox_allowed_domains` (Daytona Tier 3+, where the default is the whole internet). `blocked`: none."""
+    sandbox_allowed_domains: list[str] = [
+        "pypi.org",
+        "files.pythonhosted.org",
+        "registry.npmjs.org",
+        "github.com",
+        "codeload.github.com",
+        "objects.githubusercontent.com",
+        "raw.githubusercontent.com",
+    ]
+    """With `sandbox_network=allow_list`, the only sites a sandbox can reach. Set as JSON."""
     enable_mcp: bool = False
     """Start the saved MCP servers. Off by default: each one runs a command on the host (ADR-017)."""
     mcp_admin_token: str | None = None
@@ -93,6 +122,14 @@ class Settings(BaseSettings):
     langfuse_secret_key: str | None = Field(default=None, validation_alias="LANGFUSE_SECRET_KEY")
     langfuse_base_url: str = Field(default="https://cloud.langfuse.com", validation_alias="LANGFUSE_BASE_URL")
     """The EU cloud by default; `https://us.cloud.langfuse.com` for the US one, or a self-hosted URL."""
+
+    # TS: a model_validator runs after every field is parsed, like zod's `.superRefine` on the whole object.
+    @model_validator(mode="after")
+    def _daytona_needs_a_key(self) -> Self:
+        """Fail at startup, not on the first prompt, when the sandbox backend has no key."""
+        if self.workspace_backend == "daytona" and not self.daytona_api_key:
+            raise ValueError("AGENTSPACE_WORKSPACE_BACKEND=daytona needs DAYTONA_API_KEY.")
+        return self
 
     # TS: @property makes a getter: `settings.resolved_skills_dir`, read without parentheses.
     @property

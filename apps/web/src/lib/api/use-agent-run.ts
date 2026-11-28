@@ -38,6 +38,8 @@ type RunState = {
   toolOutput: Map<string, string>;
   /** The run is summarizing older messages (ADR-009). */
   compacting: boolean;
+  /** The session's sandbox is being created or woken, so the first tool call waits (ADR-035). */
+  workspaceStarting: boolean;
   /** The stream dropped mid-run and is being reopened after the last event seen (ADR-028). */
   reconnecting: boolean;
   error: string | null;
@@ -52,6 +54,7 @@ const idle: RunState = {
   pendingTools: new Set(),
   toolOutput: new Map(),
   compacting: false,
+  workspaceStarting: false,
   reconnecting: false,
   error: null,
 };
@@ -122,6 +125,8 @@ function reduce(s: RunState, event: RunStreamEvent): RunState {
       return { ...s, compacting: true };
     case "compaction_end":
       return { ...s, compacting: false };
+    case "workspace_status":
+      return { ...s, workspaceStarting: event.status === "starting" };
     default:
       return s;
   }
@@ -173,6 +178,10 @@ export function useAgentRun(sessionId: string, serverRunning: boolean, onUnsent:
       }
       // A failed compaction leaves no message behind, so its reason is kept to show once the run ends.
       if (event.type === "compaction_end" && event.error) error = event.error;
+      // The agent hears why its tool failed and replies; the error stays visible once the run ends too.
+      if (event.type === "workspace_status" && event.status === "failed" && event.error) {
+        error = `This session's computer couldn't start: ${event.error}`;
+      }
       // The server driving the run stopped or went silent (ADR-029): nothing in the transcript says so.
       if (event.type === "agent_end" && event.reason === "interrupted") error = INTERRUPTED;
       setState((s) => reduce(s, event));

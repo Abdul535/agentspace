@@ -57,7 +57,7 @@ ADR-003 stays as it is for steps 1–25.
 27. [x] **API auth and Host check.** A token on every API call and a Host /
     Origin allowlist, so a page in another tab can't drive the API (DNS
     rebinding, ADR-003 step 3). Not in pi (it is local-only); ours is a server.
-28. [ ] **Sandbox.** Run tools in an isolated machine (Daytona; see
+28. [x] **Sandbox.** (built, ADR-035) Run tools in an isolated machine (Daytona; see
     `apps/api/scripts/spike_daytona.py`) behind the workspace interface
     (ADR-004), so `bash` no longer runs on the host with the API's permissions.
     Opt-in per session at first.

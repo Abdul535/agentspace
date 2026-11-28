@@ -25,7 +25,16 @@ from agentspace.ai.messages import (
     UserMessage,
 )
 from agentspace.ai.providers import PROVIDERS
-from agentspace.api.deps import CatalogDep, DBDep, RunDep, RunsDep, SessionRowDep, SettingsDep, StoreDep
+from agentspace.api.deps import (
+    CatalogDep,
+    DBDep,
+    RunDep,
+    RunsDep,
+    SandboxesDep,
+    SessionRowDep,
+    SettingsDep,
+    StoreDep,
+)
 from agentspace.api.mcp_servers import McpDep, McpServerConfigsDep
 from agentspace.config import Settings
 from agentspace.mcp.manager import McpManager, ServerConfig
@@ -34,6 +43,7 @@ from agentspace.session.db import release
 from agentspace.session.models import SessionRow
 from agentspace.session.store import SessionStore
 from agentspace.tools import TOOL_SETS, ToolSetName
+from agentspace.workspace.sandboxes import Sandboxes
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])  # TS: a sub-router, like `new Hono().basePath("/sessions")`
 
@@ -238,6 +248,7 @@ async def send_message(
     catalog: CatalogDep,
     mcp: McpDep,
     mcp_servers: McpServerConfigsDep,
+    sandboxes: SandboxesDep,
 ) -> AsyncIterable[ServerSentEvent]:
     """Start a run on a new user message and stream its events as SSE.
 
@@ -252,7 +263,7 @@ async def send_message(
         await store.set_title(run.session, prompt.text()[:80] or "Image")
     # The stream lasts the whole run; its connection serves other requests meanwhile (ADR-027).
     await release(store.db)
-    loop = agent_recipe(run, PromptRun(prompt), settings, catalog, mcp, mcp_servers)
+    loop = agent_recipe(run, PromptRun(prompt), settings, catalog, mcp, mcp_servers, sandboxes)
     # TS: each `yield` sends one SSE event to the client the moment it happens.
     async for event in start_and_stream(runs, run, loop):
         yield event
@@ -283,6 +294,7 @@ async def continue_run(
     catalog: CatalogDep,
     mcp: McpDep,
     mcp_servers: McpServerConfigsDep,
+    sandboxes: SandboxesDep,
 ) -> AsyncIterable[ServerSentEvent]:
     """Start a run on the transcript as it is, with no new message: a retry after an error, a stop or a crash.
 
@@ -290,7 +302,7 @@ async def continue_run(
     is empty or ends with the agent's reply (pi's `agentLoopContinue`).
     """
     await release(db)
-    loop = agent_recipe(run, ContinueRun(), settings, catalog, mcp, mcp_servers)
+    loop = agent_recipe(run, ContinueRun(), settings, catalog, mcp, mcp_servers, sandboxes)
     async for event in start_and_stream(runs, run, loop):
         yield event
 
@@ -341,10 +353,13 @@ def agent_recipe(
     catalog: OpenRouterCatalog,
     mcp: McpManager,
     mcp_servers: list[ServerConfig],
+    sandboxes: Sandboxes | None,
 ) -> LoopFn:
-    """The loop of a prompt or continue run: the recipe with the session model's catalog entry and MCP tools."""
+    """The loop of a prompt or continue run: the recipe with the catalog entry, MCP tools and sandbox vendor."""
     lookup = model_lookup(run.session.model, catalog)
-    return run_recipe(run, kind, settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=mcp_servers)
+    return run_recipe(
+        run, kind, settings=settings, lookup_model=lookup, mcp=mcp, mcp_servers=mcp_servers, sandboxes=sandboxes
+    )
 
 
 def start_and_stream(runs: RunManager, run: Run, loop: LoopFn) -> AsyncIterator[ServerSentEvent]:

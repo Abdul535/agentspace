@@ -19,6 +19,7 @@ from agentspace.session.db import open_db
 from agentspace.session.keys import list_keys
 from agentspace.session.models import LOCAL_USER_ID, SessionRow, UserRow
 from agentspace.session.store import SessionStore
+from agentspace.workspace.sandboxes import Sandboxes
 
 
 # TS: FastAPI dependency injection. A route parameter typed `XDep` is filled by calling the function in
@@ -81,6 +82,14 @@ def get_catalog(request: Request) -> OpenRouterCatalog:
 
 
 CatalogDep = Annotated[OpenRouterCatalog, Depends(get_catalog)]
+
+
+def get_sandboxes(request: Request) -> Sandboxes | None:
+    """The app-wide sandbox vendor (ADR-035); None with the local workspace backend. Tests override this."""
+    return request.app.state.sandboxes
+
+
+SandboxesDep = Annotated[Sandboxes | None, Depends(get_sandboxes)]
 
 
 async def get_session_row(session_id: str, store: StoreDep) -> SessionRow:

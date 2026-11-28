@@ -6,10 +6,12 @@ from pathlib import Path
 import pytest
 from test_compaction import BIG, overflow, used
 from test_mcp import fake_config
+from test_sandboxes import FakeSandboxes
 from test_skills import make_skill
 
-from agentspace.agent.events import AgentEndEvent, AgentEvent
+from agentspace.agent.events import AgentEndEvent, AgentEvent, WorkspaceStatusEvent
 from agentspace.agent.run_recipe import CompactRun, ContinueRun, PromptRun, Run, RunKind, run_recipe
+from agentspace.agent.tool import ToolError
 from agentspace.ai.catalog import ModelInfo
 from agentspace.ai.messages import (
     IMAGE_NOT_SHOWN,
@@ -80,6 +82,7 @@ class Recipe:
         self.lookup = Lookup(model())
         self.mcp = McpManager()
         self.mcp_servers: list = []
+        self.sandboxes: FakeSandboxes | None = None
         self.messages: list = []
 
     def build(
@@ -98,7 +101,13 @@ class Recipe:
             loop = run_recipe(run, kind, settings=self.settings)
         else:
             loop = run_recipe(
-                run, kind, settings=self.settings, lookup_model=self.lookup, mcp=self.mcp, mcp_servers=self.mcp_servers
+                run,
+                kind,
+                settings=self.settings,
+                lookup_model=self.lookup,
+                mcp=self.mcp,
+                mcp_servers=self.mcp_servers,
+                sandboxes=self.sandboxes,
             )
 
         async def go() -> list[AgentEvent]:
@@ -381,6 +390,80 @@ async def test_skills_are_rescanned_each_run_and_their_folders_are_readable(reci
     assert "pdf-tools" in fake.contexts[-2].system_prompt
     result = next(m for m in reversed(recipe.messages) if isinstance(m, ToolResultMessage))
     assert not result.is_error and "Do the thing." in str(result.content)
+
+
+# --- a sandbox per session (ADR-035) ---------------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sandboxed(tmp_path: Path, fake: FakeProvider) -> Recipe:
+    """A session on the sandbox backend, over a fake vendor whose sandboxes keep their files in `tmp_path/box`."""
+    recipe = Recipe(tmp_path, fake, workspace_backend="daytona", daytona_api_key="test")
+    recipe.sandboxes = FakeSandboxes(str(tmp_path / "box"))
+    return recipe
+
+
+def statuses(events: list[AgentEvent]) -> list[str]:
+    """The workspace statuses a run reported, in order."""
+    return [e.status for e in events if isinstance(e, WorkspaceStatusEvent)]
+
+
+async def test_a_sandboxed_run_has_bash_and_its_files_land_in_the_sandbox(
+    sandboxed: Recipe, fake: FakeProvider, tmp_path: Path
+) -> None:
+    fake.replies = [
+        tool_reply(ToolCall(id="c1", name="bash", arguments={"command": "echo hi > made.txt"})),
+        text_reply("made it"),
+    ]
+    events = await sandboxed.run(PromptRun(prompt=UserMessage(content="make a file")))
+
+    assert "bash" in [t.name for t in fake.contexts[0].tools]  # on without AGENTSPACE_ENABLE_BASH
+    assert (tmp_path / "box/workspace/made.txt").read_text() == "hi\n"
+    assert not (sandboxed.workspace / "made.txt").exists()  # nothing on the server's disk
+    assert statuses(events) == ["starting", "ready"]  # the UI hears why the first tool call waits
+
+    # The next run finds the same sandbox running: no wait, so nothing to report.
+    fake.replies = [tool_reply(ToolCall(id="c2", name="read", arguments={"path": "made.txt"})), text_reply("ok")]
+    events = await sandboxed.run(PromptRun(prompt=UserMessage(content="read it")))
+    assert statuses(events) == []
+    assert sandboxed.sandboxes is not None and sandboxed.sandboxes.creates == 1
+
+
+async def test_a_sandboxed_run_that_only_chats_never_opens_a_sandbox(sandboxed: Recipe, fake: FakeProvider) -> None:
+    fake.replies = [text_reply("hello")]
+    events = await sandboxed.run(PromptRun(prompt=UserMessage(content="hi")))
+    assert statuses(events) == []
+    assert sandboxed.sandboxes is not None and sandboxed.sandboxes.boxes == {}
+
+
+async def test_a_sandboxed_run_lists_skills_at_their_copied_place_and_can_read_them(
+    sandboxed: Recipe, fake: FakeProvider, tmp_path: Path
+) -> None:
+    make_skill(sandboxed.settings.resolved_skills_dir / "pdf-tools", "name: pdf-tools\ndescription: Read PDFs.")
+    copied = tmp_path / "box/.agentspace/skills/pdf-tools/SKILL.md"
+    fake.replies = [tool_reply(ToolCall(id="c1", name="read", arguments={"path": str(copied)})), text_reply("read it")]
+    await sandboxed.run(PromptRun(prompt=UserMessage(content="use the pdf skill")))
+
+    assert f"<location>{copied}</location>" in fake.contexts[0].system_prompt
+    result = next(m for m in reversed(sandboxed.messages) if isinstance(m, ToolResultMessage))
+    assert not result.is_error and "Do the thing." in str(result.content)
+
+
+async def test_a_sandbox_that_cannot_start_reports_it_and_the_model_hears_why(
+    sandboxed: Recipe, fake: FakeProvider
+) -> None:
+    assert sandboxed.sandboxes is not None
+    sandboxed.sandboxes.fail_create = ToolError(
+        "The sandbox failed (create sandbox): DaytonaRateLimitError. Try again."
+    )
+    fake.replies = [tool_reply(ToolCall(id="c1", name="read", arguments={"path": "a.txt"})), text_reply("couldn't")]
+    events = await sandboxed.run(PromptRun(prompt=UserMessage(content="list files")))
+
+    assert statuses(events) == ["starting", "failed"]
+    failed = next(e for e in events if isinstance(e, WorkspaceStatusEvent) and e.status == "failed")
+    assert failed.error is not None and "RateLimit" in failed.error
+    result = next(m for m in reversed(sandboxed.messages) if isinstance(m, ToolResultMessage))
+    assert result.is_error and "RateLimit" in str(result.content)
 
 
 # --- queues (ADR-003 step 14) ---------------------------------------------------------------------------------------

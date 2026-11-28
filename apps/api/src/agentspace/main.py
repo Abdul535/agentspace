@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
 from asyncer import asyncify
+from daytona import AsyncDaytona, DaytonaConfig
 from fastapi import Depends, FastAPI
 from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -26,6 +27,8 @@ from agentspace.session.db import create_engine, session_factory
 from agentspace.session.keys import seed_local_key
 from agentspace.session.migrate import upgrade_to_head
 from agentspace.tracing import Tracer
+from agentspace.workspace.daytona import DaytonaSandboxes
+from agentspace.workspace.sandboxes import SandboxSpec
 
 log = logging.getLogger(__name__)
 
@@ -92,9 +95,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             is_busy=app.state.runs.owns,
         )
         app.state.mcp.start()
+        # One Daytona client for every session's sandbox (ADR-035); None keeps workspaces on this server.
+        daytona = None
+        app.state.sandboxes = None
+        if settings.workspace_backend == "daytona":
+            daytona = AsyncDaytona(DaytonaConfig(api_key=settings.daytona_api_key))
+            spec = SandboxSpec(
+                auto_stop_minutes=settings.sandbox_auto_stop_minutes,
+                auto_archive_minutes=settings.sandbox_auto_archive_minutes,
+                network=settings.sandbox_network,
+                allowed_domains=tuple(settings.sandbox_allowed_domains),
+            )
+            app.state.sandboxes = DaytonaSandboxes(daytona, spec)
         yield
         await app.state.runs.shutdown(settings.shutdown_grace_seconds)
         await app.state.mcp.shutdown()
+        if daytona is not None:
+            await daytona.close()  # after the runs, which use it until they stop
         # After the runs stop, so their last observations are sent too; off the event loop, since it blocks.
         await asyncify(tracer.shutdown)()
         await redis.aclose()

@@ -6,6 +6,7 @@ locals {
   secret_names = concat(
     ["AGENTSPACE_DATABASE_URL", "AGENTSPACE_REDIS_URL"],
     var.langfuse_enabled ? ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"] : [],
+    var.sandboxes_enabled ? ["DAYTONA_API_KEY"] : [],
   )
 }
 

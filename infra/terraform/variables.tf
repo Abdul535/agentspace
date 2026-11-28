@@ -24,6 +24,12 @@ variable "supabase_url" {
   default     = "https://pahaqzlwyfalonosbxxd.supabase.co"
 }
 
+variable "sandboxes_enabled" {
+  description = "Run each session's tools in its own Daytona sandbox (ADR-035): makes the Daytona key secret and turns the backend on."
+  type        = bool
+  default     = false
+}
+
 variable "langfuse_enabled" {
   description = "Make the Langfuse key secrets and pass them to the API (tracing, ADR-018)."
   type        = bool

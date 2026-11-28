@@ -128,6 +128,18 @@ class CompactionEndEvent(BaseModel):
     """Why no summary was saved, if it failed."""
 
 
+class WorkspaceStatusEvent(BaseModel):
+    """The session's sandbox had to be created or woken (ADR-035): `starting`, then `ready` or `failed`.
+
+    Never sent when the sandbox was already running, or for the local backend.
+    """
+
+    type: Literal["workspace_status"] = "workspace_status"
+    status: Literal["starting", "ready", "failed"]
+    error: str | None = None
+    """Why the sandbox couldn't start, when `failed`."""
+
+
 # Any agent event; `type` tells them apart. This is what the API streams to clients.
 # TS: type AgentEvent = AgentStartEvent | TurnStartEvent | ..., a discriminated union on `type`.
 type AgentEvent = Annotated[
@@ -142,6 +154,7 @@ type AgentEvent = Annotated[
     | TurnEndEvent
     | AgentEndEvent
     | CompactionStartEvent
-    | CompactionEndEvent,
+    | CompactionEndEvent
+    | WorkspaceStatusEvent,
     Field(discriminator="type"),
 ]

@@ -1289,6 +1289,9 @@
           },
           {
             "$ref": "#/components/schemas/CompactionEndEvent"
+          },
+          {
+            "$ref": "#/components/schemas/WorkspaceStatusEvent"
           }
         ],
         "discriminator": {
@@ -1305,7 +1308,8 @@
             "tool_execution_start": "#/components/schemas/ToolExecutionStartEvent",
             "tool_execution_update": "#/components/schemas/ToolExecutionUpdateEvent",
             "turn_end": "#/components/schemas/TurnEndEvent",
-            "turn_start": "#/components/schemas/TurnStartEvent"
+            "turn_start": "#/components/schemas/TurnStartEvent",
+            "workspace_status": "#/components/schemas/WorkspaceStatusEvent"
           }
         }
       },
@@ -3211,6 +3215,42 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WorkspaceStatusEvent": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "workspace_status",
+            "title": "Type",
+            "default": "workspace_status"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "starting",
+              "ready",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "WorkspaceStatusEvent",
+        "description": "The session's sandbox had to be created or woken (ADR-035): `starting`, then `ready` or `failed`.\n\nNever sent when the sandbox was already running, or for the local backend."
       }
     },
     "securitySchemes": {

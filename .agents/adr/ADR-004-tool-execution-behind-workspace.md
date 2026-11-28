@@ -1,6 +1,7 @@
 # ADR-004 — Tool execution behind a Workspace protocol, with a sandbox per session
 
-- **Status:** Proposed; its `Workspace` interface sketch is replaced by ADR-034 (built)
+- **Status:** Accepted (spike answered 2026-11-27, Daytona passes); its `Workspace` interface sketch is
+  replaced by ADR-034 (built), and the sandbox design is detailed in ADR-035
 - **Date:** 2026-11-17
 - **Deciders:** project owner
 
@@ -60,6 +61,44 @@ where a tool runs.
   question 1 or 2, try E2B against the same script.
 - **Order:** this lands before ADR-003 step 7 (hooks). Phase 2 rebuilds the tool
   pipeline anyway, and the hooks should be written against `Workspace`.
+
+## Spike results (2026-11-27)
+`apps/api/scripts/spike_daytona.py`, Daytona SDK 0.232.0, default snapshot. Daytona
+passes questions 1 and 2, so E2B was not tried.
+
+1. **Files survive stop → start: yes**, and archive → start too. Stop took 14.4 s,
+   start 3.3 s. Archive returned in 0.7 s and start from it in 1.1 s, which is
+   suspiciously fast: archiving likely runs on after the call returns, so a real
+   start from a fully archived sandbox is still unmeasured. Creating a new
+   sandbox took 0.6–0.8 s.
+2. **`exec`: yes, with two catches.** Exit code (3), stdout and stderr merged in
+   order, and `cwd` are right. A timeout raises `DaytonaProcessExecutionTimeoutError`
+   and the command is killed.
+   - **A background child that keeps the output open blocks `exec`.**
+     `(sleep 300; echo late) &` hung the first spike run for 25 minutes. With a
+     timeout, `exec` raises and the child is killed. With its output redirected
+     (`nohup … >/dev/null 2>&1 &`), `exec` returns in 0.3 s and the child keeps
+     running. So every command needs a timeout, even when the model gives none.
+   - **Live output needs a "session".** Plain `exec` returns output only at the
+     end. A session command (`run_async=True`, then
+     `get_session_command_logs_async`) streams: the first chunk arrived after
+     0.6 s, and the stream closed when the command ended (4.3 s, exit 4). A
+     session is one long-lived shell, so a bare `exit` ends the shell and the log
+     stream never closes: run each command in its own `sh -c`.
+3. **Bytes and folders: yes.** `upload_file` creates parent folders, a binary
+   round trip is identical, `list_files` and `get_file_info` work, and a missing
+   file raises `DaytonaFileNotFoundError`.
+4. **`rg` is in the default image** (`/usr/bin/rg`, ripgrep 14.1.1). No custom
+   snapshot needed.
+5. **The network can be blocked:** with `network_block_all` the sandbox can't even
+   resolve DNS. The SDK also has `network_allow_list` (CIDRs) and
+   `domain_allow_list`.
+6. **Found again by label and by name: yes.** `list(labels=…)` finds it, and
+   `get(name)` returns it. A second `create` with a taken name is refused
+   (`DaytonaConflictError`), so a name we choose works as a get-or-create key.
+   **It stops on its own:** the first run's sandbox was found stopped after 15
+   minutes (`auto_stop_interval=15`) although an `exec` was still hanging, so
+   Daytona counts API calls as activity, not running processes.
 
 ## Alternatives considered
 - **The whole API inside the sandbox.** Easy to deploy, but the provider key and

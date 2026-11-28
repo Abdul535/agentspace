@@ -140,6 +140,13 @@ export function Chat({ sessionId }: { sessionId: string }) {
               Connection lost. Reconnecting…
             </p>
           )}
+          {run.workspaceStarting && (
+            <p role="status" className="mb-3 flex items-center gap-2 text-sm text-pretty text-muted-foreground">
+              <Loader2 className="size-4 shrink-0 animate-spin" />
+              Starting this session&apos;s computer… Its tools wait for it, usually a few seconds. Files you made
+              before are kept.
+            </p>
+          )}
           {run.compacting && (
             <p role="status" className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" />
